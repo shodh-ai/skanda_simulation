@@ -1,19 +1,42 @@
 general:
   output_dir: "output_run"
-  num_samples: 5
-  base_seed: 42
+  num_samples: 100
+  base_seed: 12345
   save_images: True
 
 structure:
-  shape: [128, 128, 128]
-  psd_power: 1.5
+  psd_power: 2.0
   anisotropy: [1.0, 1.0, 1.0]
   target_porosity: 0.40
+  voxel_size_um: 0.1
+  volume_shape: [128, 128, 128]
+
+transport:
+  tortuosity_method: "random-walk"
+  bruggeman_from_tau: true
+  min_epsilon: 0.25
+  max_epsilon: 0.65
 
 simulation:
-  component: "separator"
+  model: "DFN"
+  component: "separator" # Options: separator, positive, negative
   cycles: 50
-  c_rate_discharge: 1.0
-  c_rate_charge: 1.0
-  voltage_min: 3.0
-  voltage_max: 4.2
+
+  # Thermal settings
+  thermal: "isothermal"
+  temperature_K: 298.15
+
+  # Geometry / Component Specs
+  separator_thickness_m: 15.0e-6
+  separator_porosity: 0.40
+  cc_thickness_neg_m: 10.0e-6
+  cc_thickness_pos_m: 15.0e-6
+  electrode_thickness_m: 60.0e-6
+
+  # The protocol steps
+  experiment:
+    - "Discharge at 1C for 60 minutes"
+    - "Rest for 15 minutes"
+    - "Charge at 1C until 4.1 V"
+    - "Hold at 4.1 V until 0.1 C"
+    - "Rest for 15 minutes"

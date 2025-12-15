@@ -37,15 +37,17 @@ def generate_structure(run_id, config, output_path):
     Returns: The file path and the calculated porosity.
     """
     params = config["structure"]
+    shape = tuple(map(int, params["volume_shape"]))
+    target_porosity = params["target_porosity"]
 
     field = gaussian_random_field(
-        shape=tuple(params["shape"]),
+        shape=shape,
         psd_power=params["psd_power"],
         anisotropy=tuple(params["anisotropy"]),
         seed=config["general"]["base_seed"] + run_id,
     )
 
-    thr = np.quantile(field, params["target_porosity"])
+    thr = np.quantile(field, target_porosity)
     binary_vol = (field <= thr).astype(np.uint8)
 
     filename = f"sample_{run_id:04d}.tif"
