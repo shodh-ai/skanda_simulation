@@ -1,0 +1,19 @@
+general:
+  output_dir: "output_run"
+  num_samples: 5
+  base_seed: 42
+  save_images: True
+
+structure:
+  shape: [128, 128, 128]
+  psd_power: 1.5
+  anisotropy: [1.0, 1.0, 1.0]
+  target_porosity: 0.40
+
+simulation:
+  component: "separator"
+  cycles: 50
+  c_rate_discharge: 1.0
+  c_rate_charge: 1.0
+  voltage_min: 3.0
+  voltage_max: 4.2
