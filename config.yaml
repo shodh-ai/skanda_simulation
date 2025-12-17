@@ -5,11 +5,28 @@ general:
   save_images: True
 
 structure:
-  psd_power: 2.0
-  anisotropy: [1.0, 1.0, 1.0]
-  target_porosity: 0.40
+  method: "physics"
+
+  # Common Geometry
+  volume_shape: [64, 64, 64]
   voxel_size_um: 0.1
-  volume_shape: [128, 128, 128]
+
+  # GRF / Initial Packing
+  target_porosity: 0.40
+  psd_power: 1.5
+  anisotropy: [1.0, 1.0, 1.0]
+
+  # Physics Engine Parameters (SciPy/NumPy)
+  # Controls binder migration and crust formation
+  drying_intensity: 0.5 # 0.0 to 1.0
+  time_steps: 60 # Number of explicit transport steps
+  dt: 0.01 # Time step size
+  velocity_scale: 1.0 # Advection strength (upward)
+  diff_pore: 1.0 # Diffusivity in empty space
+  diff_solid: 0.5 # Diffusivity in solid
+  k_evap_scale: 0.2 # Evaporation rate scaling
+  deposit_fraction: 0.10 # % of evaporated mass redeposited as crust
+  top_layers: 3 # Thickness of top crust layer
 
 transport:
   tortuosity_method: "random-walk"
