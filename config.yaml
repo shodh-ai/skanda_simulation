@@ -5,11 +5,24 @@ general:
   save_images: True
 
 structure:
+  method: "physics"
+
+  # Common settings
+  volume_shape: [64, 64, 64]
+  voxel_size_um: 0.1
+  target_porosity: 0.40
+
+  # GRF specific
   psd_power: 2.0
   anisotropy: [1.0, 1.0, 1.0]
-  target_porosity: 0.40
-  voxel_size_um: 0.1
-  volume_shape: [128, 128, 128]
+
+  # Physics/FiPy specific
+  drying_intensity: 0.5 # Controls binder migration strength (0.0 to 1.0)
+  time_steps: 20 # Number of PDE time steps
+  dt: 0.1 # Time step size
+  velocity_scale: 0.6 # Convection velocity magnitude
+  diff_pore: 1.0 # Diffusivity in pore
+  diff_solid: 0.1 # Diffusivity in solid
 
 transport:
   tortuosity_method: "random-walk"
