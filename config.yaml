@@ -1,14 +1,15 @@
 general:
-  output_dir: "output_run"
-  num_samples: 100
-  base_seed: 12345
+  output_dir: "output_run_multigpu"
+  num_samples: 10
+  base_seed: 42
   save_images: True
+  use_gpu_fipy: True  # Use PyAMGX GPU-accelerated solver for FiPy (requires pyamgx)
 
 structure:
   method: "physics"
 
   # Common settings
-  volume_shape: [64, 64, 64]
+  volume_shape: [128, 128, 128]
   voxel_size_um: 0.1
   target_porosity: 0.40
 

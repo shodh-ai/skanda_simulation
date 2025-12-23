@@ -3,6 +3,7 @@ import yaml
 import pandas as pd
 import json
 import sys
+import time
 from tqdm import tqdm
 import numpy as np
 
@@ -62,23 +63,31 @@ def main():
         }
 
         try:
+            # Structure generation with timing
+            t0 = time.perf_counter()
             file_path, binary_vol = structure.generate_structure(i, config, img_dir)
+            structure_time = time.perf_counter() - t0
             run_data["tiff_path"] = file_path
+            run_data["structure_time_s"] = round(structure_time, 3)
 
+            # Transport calculation with timing
+            t0 = time.perf_counter()
             trans_props = transport.calculate_properties(vol_data=binary_vol)
+            transport_time = time.perf_counter() - t0
             run_data.update(trans_props)
+            run_data["transport_time_s"] = round(transport_time, 3)
 
-            if "error" not in trans_props:
-                sim_data = simulation.run_battery_simulation(trans_props, config)
-                if sim_data:
-                    run_data["charging_data"] = json.dumps(sim_data)
-                    run_data["sim_status"] = "success"
-                else:
-                    run_data["sim_status"] = "failed_solver"
-                    run_data["charging_data"] = "[]"
-            else:
-                run_data["sim_status"] = "skipped_geometry"
-                run_data["charging_data"] = "[]"
+            # if "error" not in trans_props:
+            #     sim_data = simulation.run_battery_simulation(trans_props, config)
+            #     if sim_data:
+            #         run_data["charging_data"] = json.dumps(sim_data)
+            #         run_data["sim_status"] = "success"
+            #     else:
+            #         run_data["sim_status"] = "failed_solver"
+            #         run_data["charging_data"] = "[]"
+            # else:
+            #     run_data["sim_status"] = "skipped_geometry"
+            #     run_data["charging_data"] = "[]"
 
         except Exception as e:
             print(f"Error in run {i}: {e}")
@@ -95,6 +104,17 @@ def main():
     final_csv = os.path.join(out_dir, "final_results.csv")
     df.to_csv(final_csv, index=False)
 
+    # Print timing summary
+    print(f"\n--- Timing Summary ---")
+    if "structure_time_s" in df.columns:
+        avg_struct = df["structure_time_s"].mean()
+        total_struct = df["structure_time_s"].sum()
+        print(f"Structure:  {avg_struct:.3f}s avg, {total_struct:.2f}s total")
+    if "transport_time_s" in df.columns:
+        avg_trans = df["transport_time_s"].mean()
+        total_trans = df["transport_time_s"].sum()
+        print(f"Transport:  {avg_trans:.3f}s avg, {total_trans:.2f}s total")
+    print(f"----------------------")
     print(f"Pipeline complete. Results saved to {final_csv}. {len(df)} records saved.")
 
 

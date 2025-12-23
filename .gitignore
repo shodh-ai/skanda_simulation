@@ -1,3 +1,10 @@
 __pycache__/
 output_run/
 *.ipynb
+output_run_gpu/
+output_run_multigpu/
+output_run_cpu/
+env/
+.vscode/
+.cursor/
+benchmark_results/
