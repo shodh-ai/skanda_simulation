@@ -8,3 +8,4 @@ taufactor
 pybamm
 tqdm
 fipy
+mpi4py

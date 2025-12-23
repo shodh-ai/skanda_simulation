@@ -14,7 +14,7 @@ import pybamm
 # User configuration
 # -----------------------------
 # Folder where your CSV sweeps live (the one that contains the generated files)
-SWEEPS_DIR = "pybamm_param_sweeps_sep_microstructure"   # <-- change if needed
+SWEEPS_DIR = "pybamm_param_sweeps_sep_microstructure"
 
 # IMPORTANT: pattern that matches the earlier generated filenames
 CSV_GLOB = os.path.join(SWEEPS_DIR, "params_sep_micro_*_run_*.csv")
@@ -44,16 +44,19 @@ EXPORT_PLOT_CYCLES = ["first", "middle", "last"]
 # Logging detail (so you see PyBaMM progress messages)
 pybamm.set_logging_level("NOTICE")
 
+
 # -----------------------------
 # Utilities
 # -----------------------------
 def ensure_dir(path: str):
     os.makedirs(path, exist_ok=True)
 
+
 def run_name_from_csv(csv_path: str) -> str:
     base = os.path.basename(csv_path)
     name, _ = os.path.splitext(base)
     return name
+
 
 def copy_into(src: str, dst_dir: str, new_name: str = None):
     ensure_dir(dst_dir)
@@ -62,7 +65,10 @@ def copy_into(src: str, dst_dir: str, new_name: str = None):
     else:
         shutil.copy2(src, os.path.join(dst_dir, new_name))
 
-def apply_params_csv(csv_path: str, parameter_values: "pybamm.ParameterValues") -> "pybamm.ParameterValues":
+
+def apply_params_csv(
+    csv_path: str, parameter_values: "pybamm.ParameterValues"
+) -> "pybamm.ParameterValues":
     """
     Read 'key,value' rows from csv_path and parameter_values.update() where possible.
     Handles different separator Bruggeman key variants across PyBaMM versions.
@@ -102,6 +108,7 @@ def apply_params_csv(csv_path: str, parameter_values: "pybamm.ParameterValues") 
             pass
     return parameter_values
 
+
 def select_cycle_indices(sol, labels: List[str]) -> List[int]:
     """Convert labels ['first','middle','last'] to actual indices available in sol.cycles."""
     num = len(sol.cycles)
@@ -121,6 +128,7 @@ def select_cycle_indices(sol, labels: List[str]) -> List[int]:
     # De-duplicate and sort
     indices = sorted(set([i for i in indices if i is not None]))
     return indices
+
 
 def export_cycle_csv_and_plot(cycle, out_dir: str, tag: str):
     """
@@ -150,6 +158,7 @@ def export_cycle_csv_and_plot(cycle, out_dir: str, tag: str):
     plt.tight_layout()
     plt.savefig(os.path.join(out_dir, f"cycle_{tag}_voltage.png"), dpi=200)
     plt.close()
+
 
 def try_extract_summary(sol) -> Dict:
     """
@@ -186,6 +195,7 @@ def try_extract_summary(sol) -> Dict:
     summary["summary_vars_last"] = found
     return summary
 
+
 # -----------------------------
 # Main runner
 # -----------------------------
@@ -202,9 +212,15 @@ def run_all(csv_glob: str = CSV_GLOB, results_root: str = RESULTS_ROOT):
             print("   ", f)
 
     if not csv_files:
-        print("[error] No CSV files matched the pattern. Check SWEEPS_DIR and CSV_GLOB.")
-        print("[tip] Example files earlier were named like 'params_sep_micro_01_run_001.csv'.")
-        print("[tip] Set CSV_GLOB = os.path.join(SWEEPS_DIR, 'params_sep_micro_*_run_*.csv')")
+        print(
+            "[error] No CSV files matched the pattern. Check SWEEPS_DIR and CSV_GLOB."
+        )
+        print(
+            "[tip] Example files earlier were named like 'params_sep_micro_01_run_001.csv'."
+        )
+        print(
+            "[tip] Set CSV_GLOB = os.path.join(SWEEPS_DIR, 'params_sep_micro_*_run_*.csv')"
+        )
         return  # don't raise; just return so you see the prints in notebooks
 
     all_rows = []  # for global CSV summary
@@ -224,7 +240,9 @@ def run_all(csv_glob: str = CSV_GLOB, results_root: str = RESULTS_ROOT):
         # Build parameter set
         parameter_values = pybamm.ParameterValues("Mohtat2020")
         # Optional: keep your SEI tweak unless overridden by CSV
-        parameter_values.update({"SEI kinetic rate constant [m.s-1]": 1e-14}, check_already_exists=False)
+        parameter_values.update(
+            {"SEI kinetic rate constant [m.s-1]": 1e-14}, check_already_exists=False
+        )
         # Apply CSV-specified parameters
         parameter_values = apply_params_csv(csv_path, parameter_values)
 
@@ -236,7 +254,9 @@ def run_all(csv_glob: str = CSV_GLOB, results_root: str = RESULTS_ROOT):
             pass
 
         # Run experiment
-        sim = pybamm.Simulation(model, experiment=EXPERIMENT, parameter_values=parameter_values)
+        sim = pybamm.Simulation(
+            model, experiment=EXPERIMENT, parameter_values=parameter_values
+        )
         run_ok = True
         error_message = ""
         sol = None
