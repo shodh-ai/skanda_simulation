@@ -1,14 +1,3 @@
-# Battery Simulation Pipeline
-
-Generates 3D microstructures using physics-based FiPy simulation with optional GPU acceleration, calculates transport properties, and runs PyBaMM battery simulations.
-
-## Features
-
-- **Structure Generation**: Physics-based convection-diffusion-evaporation (FiPy) or Gaussian Random Field
-- **GPU Acceleration**: PyAMGX for FiPy linear solver, multi-GPU parallel processing
-- **Transport Properties**: Porosity, tortuosity, effective diffusivity (via taufactor)
-- **Battery Simulation**: PyBaMM DFN/SPM models
-
 ## Quick Start
 
 ```bash
