@@ -3,6 +3,9 @@ output_run/
 pybamm_param_sweeps_sep_microstructure/
 results/
 test_notebooks/
+checkpoints/
 
 *.ipynb
+*.parquet
+*.json
 .DS_Store

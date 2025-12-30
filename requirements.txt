@@ -9,3 +9,4 @@ pybamm
 tqdm
 fipy
 mpi4py
+pyarrow

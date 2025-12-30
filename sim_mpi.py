@@ -1,10 +1,8 @@
 import os
-import json
 import time
 import traceback
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 import pybamm
 from mpi4py import MPI
 
@@ -19,9 +17,15 @@ size = comm.Get_size()
 # Configuration
 # -----------------------------
 MASTER_CSV = "master_parameters.csv"
-RESULTS_ROOT = "results"
+RESULTS_DIR = "checkpoints"  # Directory for intermediate chunks
+FINAL_OUTPUT_FILE = "consolidated_results.parquet"  # Final single file
+
 N_CYCLES_MAX = 500
 TERMINATION = "80% capacity"
+SAVE_FREQUENCY = 10  # Save to disk every 10 runs to prevent data loss on crash
+
+# Cycles to extract arrays from
+CYCLES_TO_SAVE = ["first", "middle", "last"]
 
 EXPERIMENT = pybamm.Experiment(
     [
@@ -36,93 +40,98 @@ EXPERIMENT = pybamm.Experiment(
     termination=TERMINATION,
 )
 
-EXPORT_PLOT_CYCLES = ["first", "middle", "last"]
-pybamm.set_logging_level("ERROR")  # Higher level to avoid console flooding
+pybamm.set_logging_level("ERROR")
 
 
 # -----------------------------
-# Re-usable Utilities from original script
+# Utilities
 # -----------------------------
 def ensure_dir(path: str):
     os.makedirs(path, exist_ok=True)
 
 
-def select_cycle_indices(sol, labels):
-    num = len(sol.cycles)
-    indices = []
-    for lbl in labels:
-        if isinstance(lbl, int):
-            if 0 <= lbl < num:
-                indices.append(lbl)
-        elif isinstance(lbl, str):
-            s = lbl.lower()
-            if s == "first" and num > 0:
-                indices.append(0)
-            elif s == "middle" and num > 0:
-                indices.append(num // 2)
-            elif s == "last" and num > 0:
-                indices.append(num - 1)
-    return sorted(set([i for i in indices if i is not None]))
-
-
-def export_cycle_csv_and_plot(cycle, out_dir: str, tag: str):
+def extract_cycle_data(cycle_sol):
+    """
+    Extracts Time, Voltage, and Current arrays from a specific cycle.
+    Returns a dict compatible with Parquet storage.
+    """
     try:
-        t = cycle["Time [h]"].data
-        I = cycle["Current [A]"].data
-        V = cycle["Voltage [V]"].data
-        df = pd.DataFrame({"Time [h]": t, "Current [A]": I, "Voltage [V]": V})
-        df.to_csv(os.path.join(out_dir, f"cycle_{tag}.csv"), index=False)
-
-        plt.figure(figsize=(8, 4.5))
-        plt.plot(t, V, lw=1.5)
-        plt.xlabel("Time [h]")
-        plt.ylabel("Voltage [V]")
-        plt.title(f"Cycle {tag}: Voltage vs Time")
-        plt.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(os.path.join(out_dir, f"cycle_{tag}_voltage.png"), dpi=200)
-        plt.close()
-    except Exception as e:
-        with open(os.path.join(out_dir, f"cycle_{tag}_export_error.txt"), "w") as f:
-            f.write(str(e))
+        return {
+            "Time_h": cycle_sol["Time [h]"].data.tolist(),
+            "Voltage_V": cycle_sol["Voltage [V]"].data.tolist(),
+            "Current_A": cycle_sol["Current [A]"].data.tolist(),
+        }
+    except Exception:
+        return None
 
 
 def try_extract_summary(sol) -> dict:
-    summary = {"cycles_completed": len(sol.cycles)}
+    """Extracts scalar summary variables from the end of the simulation."""
+    summary = {}
     candidates = [
         "Capacity [A.h]",
         "Discharge capacity [A.h]",
-        "Total SEI thickness [m]",
         "Loss of lithium inventory [%]",
         "Loss of active material in negative electrode [%]",
     ]
-    found = {}
     for name in candidates:
         try:
+            # We take the last value of the summary variable
             v = sol.summary_variables[name]
             arr = getattr(v, "data", None) or getattr(v, "entries", None)
-            if arr is not None:
-                found[name] = float(arr[-1])
-        except:
+            if arr is not None and len(arr) > 0:
+                summary[name] = float(arr[-1])
+        except Exception:
             pass
-    summary["summary_vars_last"] = found
     return summary
+
+
+def save_chunk(data_buffer, filepath):
+    """Appends a list of dicts to a parquet file."""
+    if not data_buffer:
+        return
+
+    df_chunk = pd.DataFrame(data_buffer)
+
+    # If file exists, append; otherwise create
+    if os.path.exists(filepath):
+        # Read existing to append (Pandas < 1.4 doesn't support direct append well,
+        # but for safety/robustness we read-concat-write or use fastparquet/pyarrow tables.
+        # For simplicity in this script, we read-concat-write.
+        # For 1M runs, using pyarrow.Table is better, but this is 'minimal change' friendly).
+        df_existing = pd.read_parquet(filepath)
+        df_combined = pd.concat([df_existing, df_chunk], ignore_index=True)
+        df_combined.to_parquet(filepath, index=False)
+    else:
+        df_chunk.to_parquet(filepath, index=False)
+
+
+def get_completed_runs(filepath):
+    """Reads the checkpoint file to find which run_names are already finished."""
+    if not os.path.exists(filepath):
+        return set()
+    try:
+        # Only read the 'run_name' column to save memory
+        df = pd.read_parquet(filepath, columns=["run_name"])
+        return set(df["run_name"].unique())
+    except Exception:
+        return set()
 
 
 # -----------------------------
 # Main MPI Runner
 # -----------------------------
 def run_all_mpi():
-    # 1. Rank 0 loads the tasks
-    if rank == 0:
-        ensure_dir(RESULTS_ROOT)
-        if not os.path.exists(MASTER_CSV):
-            print(f"[Error] {MASTER_CSV} not found! Run the aggregation script first.")
-            comm.Abort()
+    ensure_dir(RESULTS_DIR)
 
+    # 1. Rank 0 loads the master list
+    if rank == 0:
+        if not os.path.exists(MASTER_CSV):
+            print(f"[Error] {MASTER_CSV} not found!")
+            comm.Abort()
         df_master = pd.read_csv(MASTER_CSV)
         all_tasks = df_master.to_dict("records")
-        print(f"[MPI Master] {len(all_tasks)} simulations found. Using {size} ranks.")
+        print(f"[Master] Found {len(all_tasks)} simulations. Distributing...")
     else:
         all_tasks = None
 
@@ -131,33 +140,43 @@ def run_all_mpi():
 
     # 2. Split tasks among ranks
     my_tasks = np.array_split(all_tasks, size)[rank]
-    local_summary_rows = []
 
-    for task in my_tasks:
-        run_name = task["run_name"]
-        run_dir = os.path.join(RESULTS_ROOT, run_name)
-        ensure_dir(run_dir)
+    # -----------------------------
+    # Checkpointing / Resume Logic
+    # -----------------------------
+    my_checkpoint_file = os.path.join(RESULTS_DIR, f"checkpoint_rank_{rank}.parquet")
+    completed_runs = get_completed_runs(my_checkpoint_file)
 
-        print(f"[Rank {rank}] Running: {run_name}")
-        start_time = time.time()
+    # Filter out tasks that are already done
+    tasks_to_do = [t for t in my_tasks if t.get("run_name") not in completed_runs]
 
-        # Save a copy of parameters in the run folder (as requested)
-        pd.DataFrame([task]).to_csv(
-            os.path.join(run_dir, "parameters_used.csv"), index=False
+    if len(tasks_to_do) < len(my_tasks):
+        print(
+            f"[Rank {rank}] Resuming: Skipping {len(my_tasks) - len(tasks_to_do)} already finished tasks."
         )
 
-        # Build Parameter Set
+    local_buffer = []
+
+    # 3. Processing Loop
+    for i, task in enumerate(tasks_to_do):
+        run_name = task.get("run_name", "unknown")
+
+        # Prepare the result row with input parameters
+        row = task.copy()
+
+        start_time = time.time()
+
+        # Setup Model
         parameter_values = pybamm.ParameterValues("Mohtat2020")
-        # Direct dictionary update from the master CSV row
         params_to_update = {
             k: v for k, v in task.items() if k not in ["run_name", "source_file"]
         }
         parameter_values.update(params_to_update, check_already_exists=False)
 
-        # Model Setup
         model = pybamm.lithium_ion.SPM({"SEI": "ec reaction limited"})
+
         try:
-            parameter_values.set_initial_stoichiometries(1)
+            parameter_values.set_initial_state(1)
         except:
             pass
 
@@ -173,44 +192,75 @@ def run_all_mpi():
             sol = sim.solve()
         except Exception as e:
             run_ok = False
-            error_message = "".join(traceback.format_exception_only(type(e), e))
-            with open(os.path.join(run_dir, "error.txt"), "w") as f:
-                f.write(error_message)
+            error_message = str(e)  # Simplified error string
 
         runtime_s = time.time() - start_time
 
-        # Create output row for global summary
-        row = {
-            "run": run_name,
-            "ok": run_ok,
-            "runtime_s": f"{runtime_s:.2f}",
-            "cycles_completed": len(sol.cycles) if run_ok and sol else 0,
-        }
+        # 4. Populate Output Data
+        row["status"] = "success" if run_ok else "failed"
+        row["runtime_s"] = round(runtime_s, 2)
+        row["cycles_completed"] = len(sol.cycles) if (run_ok and sol) else 0
+        row["error_message"] = error_message
 
-        # Export Files (JSON, CSVs, Plots) if successful
-        if run_ok and sol is not None:
+        if run_ok and sol:
+            # Summary stats
             summary_data = try_extract_summary(sol)
-            with open(os.path.join(run_dir, "summary.json"), "w") as f:
-                json.dump(summary_data, f, indent=2)
+            row.update(summary_data)
 
-            idxs = select_cycle_indices(sol, EXPORT_PLOT_CYCLES)
-            for cidx in idxs:
-                export_cycle_csv_and_plot(sol.cycles[cidx], run_dir, f"{cidx:04d}")
+            # Cycle Arrays
+            num_cycles = len(sol.cycles)
+            # Map logical names to indices
+            indices_map = {
+                "first": 0,
+                "middle": num_cycles // 2,
+                "last": num_cycles - 1,
+            }
 
-            # Simple file list for consistency with your old script
-            with open(os.path.join(run_dir, "files.txt"), "w") as f:
-                f.write("\n".join(sorted(os.listdir(run_dir))))
+            for label in CYCLES_TO_SAVE:
+                idx = indices_map.get(label)
+                if idx is not None and 0 <= idx < num_cycles:
+                    row[f"cycle_{label}"] = extract_cycle_data(sol.cycles[idx])
+                else:
+                    row[f"cycle_{label}"] = None
+        else:
+            # Fill None for missing data
+            for label in CYCLES_TO_SAVE:
+                row[f"cycle_{label}"] = None
 
-        local_summary_rows.append(row)
+        local_buffer.append(row)
 
-    # 3. Gather all summaries back to Rank 0
-    all_gathered = comm.gather(local_summary_rows, root=0)
+        # 5. Checkpoint to Disk
+        if len(local_buffer) >= SAVE_FREQUENCY or i == len(tasks_to_do) - 1:
+            save_chunk(local_buffer, my_checkpoint_file)
+            local_buffer = []  # Clear memory
+            print(
+                f"[Rank {rank}] Progress: {i+1}/{len(tasks_to_do)} saved to {my_checkpoint_file}"
+            )
 
+    # Wait for all ranks to finish writing their checkpoints
+    comm.Barrier()
+
+    # 6. Rank 0 merges everything into one Single File
     if rank == 0:
-        flat_results = [item for sublist in all_gathered for item in sublist]
-        summary_path = os.path.join(RESULTS_ROOT, "summary_all_runs.csv")
-        pd.DataFrame(flat_results).to_csv(summary_path, index=False)
-        print(f"\n[Done] All simulations finished. Global summary at: {summary_path}")
+        print("[Master] merging checkpoint files into single Parquet file...")
+        all_dfs = []
+        for r in range(size):
+            cp_file = os.path.join(RESULTS_DIR, f"checkpoint_rank_{r}.parquet")
+            if os.path.exists(cp_file):
+                try:
+                    df_r = pd.read_parquet(cp_file)
+                    all_dfs.append(df_r)
+                except Exception as e:
+                    print(f"[Warning] Could not read checkpoint {cp_file}: {e}")
+
+        if all_dfs:
+            final_df = pd.concat(all_dfs, ignore_index=True)
+            final_df.to_parquet(FINAL_OUTPUT_FILE, index=False)
+            print(
+                f"[Done] Successfully saved {len(final_df)} runs to {FINAL_OUTPUT_FILE}"
+            )
+        else:
+            print("[Error] No results found to merge.")
 
 
 if __name__ == "__main__":
