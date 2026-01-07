@@ -23,12 +23,12 @@ geometry:
   # Range: 20.0 - 150.0 um (typical commercial range)
   coating_thickness_um: 50.0
 
+  # Current collector (always copper for anodes)
+  current_collector: "Cu"
+
 # --- SELECTION ---
 # Options: "graphite", "silicon_composite", "hard_carbon", "soft_carbon", "lto"
 active_type: "graphite"
-
-# Current collector (always copper for anodes)
-current_collector: "Cu"
 
 # =============================================================================
 # PARAMETER BLOCKS
@@ -85,35 +85,35 @@ graphite:
   target_porosity: 0.35
 
   # Conductive additive parameters
-  conductive_additive:
-    # Type: "carbon_black", "super_p", "cnt", "graphene"
-    type: "carbon_black"
 
-    # Weight fraction (0.0 - 0.1)
-    weight_fraction: 0.02
+  # Type: "carbon_black", "super_p", "cnt", "graphene"
+  conductive_additive_type: "carbon_black"
 
-    # Primary particle/aggregate size (nm)
-    # Carbon black: 30 - 100 nm
-    # CNT: diameter 5-50 nm, length 1-10 um
-    particle_size_nm: 40.0
+  # Weight fraction (0.0 - 0.1)
+  conductive_additive_wt_frac: 0.02
 
-    # Distribution mode: "aggregate", "dispersed", "network"
-    distribution_mode: "network"
+  # Primary particle/aggregate size (nm)
+  # Carbon black: 30 - 100 nm
+  # CNT: diameter 5-50 nm, length 1-10 um
+  conductive_additive_particle_size_nm: 40.0
+
+  # Distribution mode: "aggregate", "dispersed", "network"
+  conductive_additive_distribution: "network"
 
   # Binder parameters
-  binder:
-    # Type: "pvdf", "cmc", "sbr", "pai"
-    type: "pvdf"
 
-    # Weight fraction (0.02 - 0.1)
-    weight_fraction: 0.05
+  # Type: "pvdf", "cmc", "sbr", "pai"
+  binder_type: "pvdf"
 
-    # Distribution: "uniform", "patchy", "necks"
-    distribution: "necks"
+  # Weight fraction (0.02 - 0.1)
+  binder_wt_frac: 0.05
 
-    # Film thickness at particle contacts (nm)
-    # Range: 5.0 - 50.0
-    film_thickness_nm: 15.0
+  # Distribution: "uniform", "patchy", "necks"
+  binder_distribution: "necks"
+
+  # Film thickness at particle contacts (nm)
+  # Range: 5.0 - 50.0
+  binder_film_thickness_nm: 15.0
 
 # --- 2. SILICON COMPOSITE PARAMS ---
 silicon_composite:
@@ -157,34 +157,51 @@ silicon_composite:
   void_fraction: 0.3
 
   # Coating on Si particles
-  coating:
-    # enabled: true/false
-    enabled: true
 
-    # Type: "carbon", "silicon_oxide", "none"
-    type: "carbon"
+  # enabled: true/false
+  si_coating_enabled: true
 
-    # Coating thickness (nm)
-    # Carbon: 5 - 50 nm
-    # SiOx: 2 - 20 nm
-    thickness_nm: 10.0
+  # Type: "carbon", "silicon_oxide", "none"
+  si_coating_type: "carbon"
+
+  # Coating thickness (nm)
+  # Carbon: 5 - 50 nm
+  # SiOx: 2 - 20 nm
+  si_coating_thickness_nm: 10.0
 
   # Overall electrode porosity
   target_porosity: 0.40
 
-  # Conductive additive (same structure as graphite)
-  conductive_additive:
-    type: "cnt"
-    weight_fraction: 0.03
-    particle_size_nm: 10.0 # diameter for CNT
-    distribution_mode: "network"
+  # Conductive additive parameters
 
-  # Binder (same structure as graphite)
-  binder:
-    type: "cmc"
-    weight_fraction: 0.08
-    distribution: "uniform"
-    film_thickness_nm: 20.0
+  # Type: "carbon_black", "super_p", "cnt", "graphene"
+  conductive_additive_type: "carbon_black"
+
+  # Weight fraction (0.0 - 0.1)
+  conductive_additive_wt_frac: 0.02
+
+  # Primary particle/aggregate size (nm)
+  # Carbon black: 30 - 100 nm
+  # CNT: diameter 5-50 nm, length 1-10 um
+  conductive_additive_particle_size_nm: 40.0
+
+  # Distribution mode: "aggregate", "dispersed", "network"
+  conductive_additive_distribution: "network"
+
+  # Binder parameters
+
+  # Type: "pvdf", "cmc", "sbr", "pai"
+  binder_type: "pvdf"
+
+  # Weight fraction (0.02 - 0.1)
+  binder_wt_frac: 0.05
+
+  # Distribution: "uniform", "patchy", "necks"
+  binder_distribution: "necks"
+
+  # Film thickness at particle contacts (nm)
+  # Range: 5.0 - 50.0
+  binder_film_thickness_nm: 15.0
 
 # --- 3. HARD CARBON PARAMS ---
 hard_carbon:
@@ -221,26 +238,26 @@ hard_carbon:
   crystallite_la_nm: 4.0
 
   # Micropore parameters
-  micropores:
-    # Micropore volume fraction
-    # Range: 0.05 - 0.25
-    volume_fraction: 0.15
 
-    # Average pore size (nm)
-    # Micropores: 0.5 - 2.0
-    average_size_nm: 1.0
+  # Micropore volume fraction
+  # Range: 0.05 - 0.25
+  micropore_volume_fraction: 0.15
 
-    # Pore size distribution
-    size_distribution: 0.4
+  # Average pore size (nm)
+  # Micropores: 0.5 - 2.0
+  micropore_average_size_nm: 1.0
+
+  # Pore size distribution
+  micropore_size_distribution: 0.4
 
   # Closed pore parameters (nanopores between graphene layers)
-  closed_pores:
-    # Volume fraction
-    # Range: 0.10 - 0.30
-    volume_fraction: 0.20
 
-    # Average size (nm)
-    average_size_nm: 0.7
+  # Volume fraction
+  # Range: 0.10 - 0.30
+  closed_pore_volume_fraction: 0.20
+
+  # Average size (nm)
+  closed_pore_avg_size_nm: 0.7
 
   # Surface area (m²/g)
   # Low: 1 - 10
@@ -251,19 +268,36 @@ hard_carbon:
   # Electrode porosity
   target_porosity: 0.40
 
-  # Conductive additive
-  conductive_additive:
-    type: "carbon_black"
-    weight_fraction: 0.03
-    particle_size_nm: 50.0
-    distribution_mode: "dispersed"
+  # Conductive additive parameters
 
-  # Binder
-  binder:
-    type: "cmc"
-    weight_fraction: 0.06
-    distribution: "uniform"
-    film_thickness_nm: 10.0
+  # Type: "carbon_black", "super_p", "cnt", "graphene"
+  conductive_additive_type: "carbon_black"
+
+  # Weight fraction (0.0 - 0.1)
+  conductive_additive_wt_frac: 0.02
+
+  # Primary particle/aggregate size (nm)
+  # Carbon black: 30 - 100 nm
+  # CNT: diameter 5-50 nm, length 1-10 um
+  conductive_additive_particle_size_nm: 40.0
+
+  # Distribution mode: "aggregate", "dispersed", "network"
+  conductive_additive_distribution: "network"
+
+  # Binder parameters
+
+  # Type: "pvdf", "cmc", "sbr", "pai"
+  binder_type: "pvdf"
+
+  # Weight fraction (0.02 - 0.1)
+  binder_wt_frac: 0.05
+
+  # Distribution: "uniform", "patchy", "necks"
+  binder_distribution: "necks"
+
+  # Film thickness at particle contacts (nm)
+  # Range: 5.0 - 50.0
+  binder_film_thickness_nm: 15.0
 
 # --- 4. SOFT CARBON PARAMS ---
 soft_carbon:
@@ -302,17 +336,36 @@ soft_carbon:
 
   target_porosity: 0.35
 
-  conductive_additive:
-    type: "super_p"
-    weight_fraction: 0.02
-    particle_size_nm: 40.0
-    distribution_mode: "aggregate"
+  # Conductive additive parameters
 
-  binder:
-    type: "pvdf"
-    weight_fraction: 0.05
-    distribution: "necks"
-    film_thickness_nm: 12.0
+  # Type: "carbon_black", "super_p", "cnt", "graphene"
+  conductive_additive_type: "carbon_black"
+
+  # Weight fraction (0.0 - 0.1)
+  conductive_additive_wt_frac: 0.02
+
+  # Primary particle/aggregate size (nm)
+  # Carbon black: 30 - 100 nm
+  # CNT: diameter 5-50 nm, length 1-10 um
+  conductive_additive_particle_size_nm: 40.0
+
+  # Distribution mode: "aggregate", "dispersed", "network"
+  conductive_additive_distribution: "network"
+
+  # Binder parameters
+
+  # Type: "pvdf", "cmc", "sbr", "pai"
+  binder_type: "pvdf"
+
+  # Weight fraction (0.02 - 0.1)
+  binder_wt_frac: 0.05
+
+  # Distribution: "uniform", "patchy", "necks"
+  binder_distribution: "necks"
+
+  # Film thickness at particle contacts (nm)
+  # Range: 5.0 - 50.0
+  binder_film_thickness_nm: 15.0
 
 # --- 5. LTO PARAMS ---
 lto:
@@ -343,40 +396,58 @@ lto:
   ti3_plus_fraction: 0.02
 
   # Carbon coating (to improve conductivity)
-  carbon_coating:
-    enabled: true
 
-    # Thickness (nm)
-    # Range: 2 - 20
-    thickness_nm: 5.0
+  carbon_coating_enabled: true
 
-    # Coverage: 0.0 - 1.0 (fraction of surface covered)
-    coverage: 0.95
+  # Thickness (nm)
+  # Range: 2 - 20
+  carbon_coating_thickness_nm: 5.0
+
+  # Coverage: 0.0 - 1.0 (fraction of surface covered)
+  carbon_coating_coverage: 0.95
 
   # Graphene/CNT incorporation
-  carbon_nanomaterial:
-    enabled: true
+  carbon_nano_enabled: true
 
-    # Type: "graphene", "cnt", "both"
-    type: "graphene"
+  # Type: "graphene", "cnt", "both"
+  carbon_nano_type: "graphene"
 
-    # Weight fraction
-    # Range: 0.01 - 0.10
-    weight_fraction: 0.05
+  # Weight fraction
+  # Range: 0.01 - 0.10
+  carbon_nano_wt_frac: 0.05
 
   target_porosity: 0.40
 
-  conductive_additive:
-    type: "super_p"
-    weight_fraction: 0.03
-    particle_size_nm: 40.0
-    distribution_mode: "network"
+  # Conductive additive parameters
 
-  binder:
-    type: "pvdf"
-    weight_fraction: 0.06
-    distribution: "uniform"
-    film_thickness_nm: 8.0
+  # Type: "carbon_black", "super_p", "cnt", "graphene"
+  conductive_additive_type: "carbon_black"
+
+  # Weight fraction (0.0 - 0.1)
+  conductive_additive_wt_frac: 0.02
+
+  # Primary particle/aggregate size (nm)
+  # Carbon black: 30 - 100 nm
+  # CNT: diameter 5-50 nm, length 1-10 um
+  conductive_additive_particle_size_nm: 40.0
+
+  # Distribution mode: "aggregate", "dispersed", "network"
+  conductive_additive_distribution: "network"
+
+  # Binder parameters
+
+  # Type: "pvdf", "cmc", "sbr", "pai"
+  binder_type: "pvdf"
+
+  # Weight fraction (0.02 - 0.1)
+  binder_wt_frac: 0.05
+
+  # Distribution: "uniform", "patchy", "necks"
+  binder_distribution: "necks"
+
+  # Film thickness at particle contacts (nm)
+  # Range: 5.0 - 50.0
+  binder_film_thickness_nm: 15.0
 
 # =============================================================================
 # MICROSTRUCTURE GENERATION PARAMETERS
@@ -468,40 +539,3 @@ defects:
 
     # Degree of clustering: 0.0 = uniform, 1.0 = highly clustered
     clustering_degree: 0.3
-
-# =============================================================================
-# RANDOMIZATION RANGES (for batch generation)
-# =============================================================================
-
-randomization:
-  # Enable parameter randomization for batch runs
-  enabled: true
-
-  # For each parameter, specify [min, max] range
-  # Parameters will be randomly sampled within these ranges
-  # Comment out or set to null to use fixed values above
-
-  ranges:
-    # Example for graphite
-    graphite:
-      primary_particle_size_um: [10.0, 25.0]
-      secondary_particle_size_um: [15.0, 40.0]
-      size_distribution: [0.15, 0.50]
-      aspect_ratio: [3.0, 8.0]
-      d002_spacing_nm: [0.335, 0.338]
-      crystallite_lc_nm: [100.0, 300.0]
-      orientation_degree: [0.3, 0.8]
-      target_porosity: [0.25, 0.45]
-      conductive_additive:
-        weight_fraction: [0.01, 0.05]
-      binder:
-        weight_fraction: [0.03, 0.08]
-
-    # Similar ranges for other anode types...
-    silicon_composite:
-      silicon_weight_fraction: [0.05, 0.25]
-      si_particle_size_nm: [50.0, 300.0]
-      target_porosity: [0.35, 0.50]
-
-    field_of_view_x_um: [5.0, 15.0]
-    coating_thickness_um: [30.0, 100.0]
