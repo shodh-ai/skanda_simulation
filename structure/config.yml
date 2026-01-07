@@ -1,0 +1,507 @@
+# =============================================================================
+# ANODE MICROSTRUCTURE GENERATION TEMPLATE
+# =============================================================================
+
+# --- METADATA ---
+run_id: 0
+seed: 42
+
+# --- GEOMETRY ---
+geometry:
+  # Dimensions [Z, Y, X] - Z is through-thickness direction
+  shape: [128, 128, 128]
+
+  # Field of view dictates voxel resolution
+  # Voxel_Size_nm = (FOV_um * 1000) / 128
+  # Recommended FOV ranges by anode type:
+  #   Graphite/LTO: 5.0 - 15.0 um (39-117 nm/voxel)
+  #   Si-composite: 3.0 - 8.0 um (23-62 nm/voxel)
+  #   Hard carbon: 8.0 - 20.0 um (62-156 nm/voxel)
+  field_of_view_x_um: 10.0
+
+  # Coating thickness on copper foil (excluding current collector)
+  # Range: 20.0 - 150.0 um (typical commercial range)
+  coating_thickness_um: 50.0
+
+# --- SELECTION ---
+# Options: "graphite", "silicon_composite", "hard_carbon", "soft_carbon", "lto"
+active_type: "graphite"
+
+# Current collector (always copper for anodes)
+current_collector: "Cu"
+
+# =============================================================================
+# PARAMETER BLOCKS
+# =============================================================================
+
+# --- 1. GRAPHITE PARAMS ---
+graphite:
+  # Graphite type options: "natural", "artificial", "mcmb"
+  graphite_type: "artificial"
+
+  # Primary particle size (individual crystallites)
+  # Natural: 5.0 - 25.0 um
+  # Artificial: 10.0 - 30.0 um
+  # MCMB: 5.0 - 40.0 um
+  primary_particle_size_um: 15.0
+
+  # Secondary particle size (agglomerates)
+  # Range: 5.0 - 50.0 um
+  secondary_particle_size_um: 20.0
+
+  # Particle size distribution (standard deviation / mean)
+  # Narrow: 0.1 - 0.3
+  # Wide: 0.4 - 0.8
+  size_distribution: 0.25
+
+  # Particle shape factor (aspect ratio for flakes)
+  # Spherical MCMB: 1.0 - 1.2
+  # Flake graphite: 3.0 - 10.0
+  aspect_ratio: 5.0
+
+  # Crystallite parameters
+  # Interlayer spacing d002 (nm)
+  # Highly crystalline: 0.335 - 0.337
+  # Less crystalline: 0.337 - 0.340
+  d002_spacing_nm: 0.336
+
+  # Crystallite size Lc (thickness, nm)
+  # Natural: 50.0 - 200.0
+  # Artificial: 100.0 - 500.0
+  crystallite_lc_nm: 150.0
+
+  # Crystallite size La (lateral, nm)
+  # Range: 20.0 - 100.0
+  crystallite_la_nm: 50.0
+
+  # Particle orientation (texture)
+  # 0.0 = random, 1.0 = perfectly aligned parallel to current collector
+  orientation_degree: 0.6
+
+  # Electrode porosity (after calendering)
+  # Low: 0.20 - 0.30 (high energy density)
+  # Medium: 0.30 - 0.40 (balanced)
+  # High: 0.40 - 0.50 (high power)
+  target_porosity: 0.35
+
+  # Conductive additive parameters
+  conductive_additive:
+    # Type: "carbon_black", "super_p", "cnt", "graphene"
+    type: "carbon_black"
+
+    # Weight fraction (0.0 - 0.1)
+    weight_fraction: 0.02
+
+    # Primary particle/aggregate size (nm)
+    # Carbon black: 30 - 100 nm
+    # CNT: diameter 5-50 nm, length 1-10 um
+    particle_size_nm: 40.0
+
+    # Distribution mode: "aggregate", "dispersed", "network"
+    distribution_mode: "network"
+
+  # Binder parameters
+  binder:
+    # Type: "pvdf", "cmc", "sbr", "pai"
+    type: "pvdf"
+
+    # Weight fraction (0.02 - 0.1)
+    weight_fraction: 0.05
+
+    # Distribution: "uniform", "patchy", "necks"
+    distribution: "necks"
+
+    # Film thickness at particle contacts (nm)
+    # Range: 5.0 - 50.0
+    film_thickness_nm: 15.0
+
+# --- 2. SILICON COMPOSITE PARAMS ---
+silicon_composite:
+  # Silicon content (weight fraction of total active material)
+  # Low: 0.05 - 0.15 (commercial current state)
+  # Medium: 0.15 - 0.30 (next-gen)
+  # High: 0.30 - 0.50 (research)
+  silicon_weight_fraction: 0.10
+
+  # Silicon particle size
+  # Nano: 30 - 150 nm (better cycling)
+  # Submicron: 150 - 500 nm
+  # Micron: 500 - 3000 nm (cheaper, worse cycling)
+  si_particle_size_nm: 100.0
+
+  # Silicon particle size distribution
+  si_size_distribution: 0.3
+
+  # Silicon particle morphology: "spherical", "irregular", "porous"
+  si_morphology: "spherical"
+
+  # For porous Si: internal porosity
+  # Range: 0.3 - 0.7
+  si_internal_porosity: 0.5
+
+  # Carbon matrix type: "graphite", "hard_carbon", "soft_carbon"
+  carbon_matrix_type: "graphite"
+
+  # Carbon particle size (um)
+  carbon_particle_size_um: 12.0
+
+  # Si distribution mode: "embedded", "surface_anchored", "core_shell"
+  si_distribution: "embedded"
+
+  # Void space design (for volume expansion accommodation)
+  # enabled: true creates intentional voids around Si particles
+  void_space_enabled: true
+
+  # Void fraction (volume around Si particles)
+  # Range: 0.2 - 0.5 of Si particle volume
+  void_fraction: 0.3
+
+  # Coating on Si particles
+  coating:
+    # enabled: true/false
+    enabled: true
+
+    # Type: "carbon", "silicon_oxide", "none"
+    type: "carbon"
+
+    # Coating thickness (nm)
+    # Carbon: 5 - 50 nm
+    # SiOx: 2 - 20 nm
+    thickness_nm: 10.0
+
+  # Overall electrode porosity
+  target_porosity: 0.40
+
+  # Conductive additive (same structure as graphite)
+  conductive_additive:
+    type: "cnt"
+    weight_fraction: 0.03
+    particle_size_nm: 10.0 # diameter for CNT
+    distribution_mode: "network"
+
+  # Binder (same structure as graphite)
+  binder:
+    type: "cmc"
+    weight_fraction: 0.08
+    distribution: "uniform"
+    film_thickness_nm: 20.0
+
+# --- 3. HARD CARBON PARAMS ---
+hard_carbon:
+  # Precursor type: "biomass", "resin", "polymer"
+  precursor_type: "biomass"
+
+  # Pyrolysis temperature (affects crystallinity)
+  # Low: 800 - 1200 C (more disordered)
+  # Medium: 1200 - 1600 C
+  # High: 1600 - 2200 C (partial graphitization)
+  pyrolysis_temp_c: 1400.0
+
+  # Primary particle size (um)
+  # Range: 1.0 - 30.0
+  particle_size_um: 10.0
+
+  # Particle size distribution
+  size_distribution: 0.35
+
+  # Particle shape: "spherical", "irregular", "fiber"
+  particle_shape: "irregular"
+
+  # Interlayer spacing d002 (nm)
+  # Highly disordered: 0.37 - 0.40
+  # Moderately disordered: 0.40 - 0.43
+  d002_spacing_nm: 0.38
+
+  # Crystallite size Lc (nm)
+  # Range: 1.0 - 5.0 (much smaller than graphite)
+  crystallite_lc_nm: 2.0
+
+  # Crystallite size La (nm)
+  # Range: 1.0 - 10.0
+  crystallite_la_nm: 4.0
+
+  # Micropore parameters
+  micropores:
+    # Micropore volume fraction
+    # Range: 0.05 - 0.25
+    volume_fraction: 0.15
+
+    # Average pore size (nm)
+    # Micropores: 0.5 - 2.0
+    average_size_nm: 1.0
+
+    # Pore size distribution
+    size_distribution: 0.4
+
+  # Closed pore parameters (nanopores between graphene layers)
+  closed_pores:
+    # Volume fraction
+    # Range: 0.10 - 0.30
+    volume_fraction: 0.20
+
+    # Average size (nm)
+    average_size_nm: 0.7
+
+  # Surface area (m²/g)
+  # Low: 1 - 10
+  # Medium: 10 - 100
+  # High: 100 - 500
+  specific_surface_area: 50.0
+
+  # Electrode porosity
+  target_porosity: 0.40
+
+  # Conductive additive
+  conductive_additive:
+    type: "carbon_black"
+    weight_fraction: 0.03
+    particle_size_nm: 50.0
+    distribution_mode: "dispersed"
+
+  # Binder
+  binder:
+    type: "cmc"
+    weight_fraction: 0.06
+    distribution: "uniform"
+    film_thickness_nm: 10.0
+
+# --- 4. SOFT CARBON PARAMS ---
+soft_carbon:
+  # Precursor: "coal_tar_pitch", "petroleum_pitch", "mesocarbon"
+  precursor_type: "petroleum_pitch"
+
+  # Graphitization temperature
+  # Range: 2000 - 2800 C
+  graphitization_temp_c: 2400.0
+
+  # Particle size (um)
+  # Range: 5.0 - 40.0
+  particle_size_um: 15.0
+
+  size_distribution: 0.3
+
+  # Interlayer spacing d002 (nm)
+  # Between graphite and hard carbon: 0.340 - 0.355
+  d002_spacing_nm: 0.345
+
+  # Crystallite size Lc (nm)
+  # Range: 10.0 - 50.0
+  crystallite_lc_nm: 25.0
+
+  # Crystallite size La (nm)
+  # Range: 10.0 - 50.0
+  crystallite_la_nm: 30.0
+
+  # Surface roughness (affects SEI formation)
+  # 0.0 = smooth, 1.0 = very rough
+  surface_roughness: 0.3
+
+  # Micropore volume fraction
+  # Range: 0.01 - 0.10 (less than hard carbon)
+  micropore_fraction: 0.05
+
+  target_porosity: 0.35
+
+  conductive_additive:
+    type: "super_p"
+    weight_fraction: 0.02
+    particle_size_nm: 40.0
+    distribution_mode: "aggregate"
+
+  binder:
+    type: "pvdf"
+    weight_fraction: 0.05
+    distribution: "necks"
+    film_thickness_nm: 12.0
+
+# --- 5. LTO PARAMS ---
+lto:
+  # Synthesis method: "solid_state", "hydrothermal", "sol_gel"
+  synthesis_method: "hydrothermal"
+
+  # Primary particle size (nm)
+  # Nano: 20 - 100 nm (best rate performance)
+  # Submicron: 100 - 500 nm
+  # Micron: 500 - 2000 nm
+  primary_particle_size_nm: 50.0
+
+  # Secondary particle size (um)
+  # Range: 1.0 - 20.0
+  secondary_particle_size_um: 5.0
+
+  size_distribution: 0.25
+
+  # Particle morphology: "spherical", "cubic", "sheet"
+  particle_shape: "spherical"
+
+  # Crystallinity (affects conductivity)
+  # 0.7 = moderate, 0.9 = high, 1.0 = perfect
+  crystallinity: 0.85
+
+  # Ti3+ defect concentration (improves conductivity)
+  # Range: 0.0 - 0.05 (atomic fraction)
+  ti3_plus_fraction: 0.02
+
+  # Carbon coating (to improve conductivity)
+  carbon_coating:
+    enabled: true
+
+    # Thickness (nm)
+    # Range: 2 - 20
+    thickness_nm: 5.0
+
+    # Coverage: 0.0 - 1.0 (fraction of surface covered)
+    coverage: 0.95
+
+  # Graphene/CNT incorporation
+  carbon_nanomaterial:
+    enabled: true
+
+    # Type: "graphene", "cnt", "both"
+    type: "graphene"
+
+    # Weight fraction
+    # Range: 0.01 - 0.10
+    weight_fraction: 0.05
+
+  target_porosity: 0.40
+
+  conductive_additive:
+    type: "super_p"
+    weight_fraction: 0.03
+    particle_size_nm: 40.0
+    distribution_mode: "network"
+
+  binder:
+    type: "pvdf"
+    weight_fraction: 0.06
+    distribution: "uniform"
+    film_thickness_nm: 8.0
+
+# =============================================================================
+# MICROSTRUCTURE GENERATION PARAMETERS
+# =============================================================================
+
+generation:
+  # Calendering effect simulation
+  calendering:
+    # Compression ratio: final_thickness / initial_thickness
+    # Range: 0.5 - 0.9 (lower = more compression)
+    compression_ratio: 0.7
+
+    # Particle deformation (how much particles flatten)
+    # 0.0 = rigid, 1.0 = highly deformable
+    particle_deformation: 0.3
+
+    # Preferred orientation increase after calendering
+    # 0.0 = no change, 0.5 = significant alignment
+    orientation_enhancement: 0.2
+
+  # SEI (Solid Electrolyte Interphase) layer
+  sei_layer:
+    # Include SEI in microstructure
+    enabled: true
+
+    # SEI thickness (nm)
+    # Fresh electrode: 5 - 20
+    # After cycling: 20 - 100
+    thickness_nm: 15.0
+
+    # SEI uniformity: 0.0 = perfectly uniform, 1.0 = highly variable
+    uniformity: 0.3
+
+  # Particle contact mechanics
+  contacts:
+    # Average coordination number (contacts per particle)
+    # Range: 4 - 8
+    coordination_number: 6.0
+
+    # Contact area fraction (contact area / particle surface)
+    # Range: 0.05 - 0.20
+    contact_area_fraction: 0.10
+
+  # Tortuosity (affects Li-ion transport)
+  # Auto-calculated from porosity, or manually set
+  # Range: 1.5 - 4.0 (higher = more tortuous)
+  tortuosity_manual: null # null = auto-calculate
+
+  # Percolation (electrical network)
+  percolation:
+    # Ensure percolating network of active material + conductive additive
+    enforce_percolation: true
+
+    # Minimum percolation threshold
+    min_percolation: 0.95
+
+# =============================================================================
+# DEFECTS AND VARIATIONS (for dataset diversity)
+# =============================================================================
+
+defects:
+  # Particle cracking (especially for Si)
+  particle_cracks:
+    enabled: false
+
+    # Probability of cracked particle
+    crack_probability: 0.05
+
+    # Average crack width (nm)
+    crack_width_nm: 50.0
+
+  # Binder agglomeration
+  binder_agglomeration:
+    enabled: false
+
+    # Creates regions of excess binder
+    agglomeration_probability: 0.10
+
+  # Delamination (electrode-current collector)
+  delamination:
+    enabled: false
+
+    # Fraction of interface delaminated
+    delamination_fraction: 0.05
+
+  # Pore clustering (non-uniform porosity)
+  pore_clustering:
+    enabled: false
+
+    # Degree of clustering: 0.0 = uniform, 1.0 = highly clustered
+    clustering_degree: 0.3
+
+# =============================================================================
+# RANDOMIZATION RANGES (for batch generation)
+# =============================================================================
+
+randomization:
+  # Enable parameter randomization for batch runs
+  enabled: true
+
+  # For each parameter, specify [min, max] range
+  # Parameters will be randomly sampled within these ranges
+  # Comment out or set to null to use fixed values above
+
+  ranges:
+    # Example for graphite
+    graphite:
+      primary_particle_size_um: [10.0, 25.0]
+      secondary_particle_size_um: [15.0, 40.0]
+      size_distribution: [0.15, 0.50]
+      aspect_ratio: [3.0, 8.0]
+      d002_spacing_nm: [0.335, 0.338]
+      crystallite_lc_nm: [100.0, 300.0]
+      orientation_degree: [0.3, 0.8]
+      target_porosity: [0.25, 0.45]
+      conductive_additive:
+        weight_fraction: [0.01, 0.05]
+      binder:
+        weight_fraction: [0.03, 0.08]
+
+    # Similar ranges for other anode types...
+    silicon_composite:
+      silicon_weight_fraction: [0.05, 0.25]
+      si_particle_size_nm: [50.0, 300.0]
+      target_porosity: [0.35, 0.50]
+
+    field_of_view_x_um: [5.0, 15.0]
+    coating_thickness_um: [30.0, 100.0]
