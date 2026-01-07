@@ -1,9 +1,0 @@
-numpy
-matplotlib
-pandas
-scipy
-pyyaml
-tifffile
-taufactor
-pybamm
-tqdm
