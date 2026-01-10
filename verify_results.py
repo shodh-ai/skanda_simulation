@@ -6,7 +6,7 @@ import os
 # -----------------------------
 # Configuration
 # -----------------------------
-INPUT_FILE = "consolidated_results.parquet"
+INPUT_FILE = "consolidated_results_dfn.parquet"
 OUTPUT_FILE = "verification_sample.json"
 SAMPLE_SIZE = 10
 
