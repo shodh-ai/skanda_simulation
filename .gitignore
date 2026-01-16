@@ -8,3 +8,5 @@ env/
 .vscode/
 .cursor/
 benchmark_results/
+.DS_Store
+output_parameter_sweep/

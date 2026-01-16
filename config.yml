@@ -1,0 +1,12 @@
+run:
+  output_dir: "output_parameter_sweep"
+  num_samples: 100
+  base_seed: 5555
+
+system:
+  volume_shape: [128, 128, 128]
+  voxel_size_um: 0.1
+
+  # Physics Time Integration (Fixed for stability)
+  time_steps: 30
+  dt: 0.05

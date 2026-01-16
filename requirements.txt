@@ -1,10 +1,7 @@
 numpy
-matplotlib
-pandas
 scipy
 pyyaml
 tifffile
-taufactor
-pybamm
-tqdm
 fipy
+pyamgx
+pandas
