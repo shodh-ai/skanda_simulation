@@ -40,30 +40,59 @@ def generate_parameter_manifest(num_samples, seed):
     """
     rng = np.random.default_rng(seed)
 
-    # Define ranges for the sweep
-    data = {
-        "id": np.arange(num_samples),
-        # Porosity: Void fraction (0.3 to 0.6)
-        "target_porosity": rng.uniform(0.30, 0.60, num_samples),
-        # PSD Power: Controls particle clumpiness (1.5=noisy, 3.0=large clusters)
-        "psd_power": rng.uniform(1.5, 3.0, num_samples),
-        # Anisotropy: Stretching in Z (1.0 = isotropic, 1.5 = elongated in Z)
-        "anisotropy_z": rng.uniform(0.8, 1.2, num_samples),
-        # Drying Intensity: Strength of binder migration (0.1 = low, 1.0 = high)
-        "drying_intensity": rng.uniform(0, 1.0, num_samples),
-        # Velocity Scale: Convection strength vs Diffusion (Peclet number proxy)
-        "velocity_scale": rng.uniform(0.2, 0.6, num_samples),
-        # Diffusivity ratio (usually fixed, but can vary)
-        "diff_pore": np.ones(num_samples) * 1.0,
-        "diff_solid": np.ones(num_samples) * 0.1,
+    # Define ranges (Min, Max) matching Code 1
+    RANGES = {
+        "target_porosity": (0.20, 0.80),
+        "psd_power": (0.8, 2.2),
+        "anisotropy_z": (0.7, 1.3),
+        "drying_intensity": (0.1, 0.7),
+        "velocity_scale": (0.2, 1.0),
+        "evap_strength": (4.0, 8.0),
+        "redeposition_factor": (0.03, 0.12),
+        "top_mask_zmin": (0.70, 0.85),
     }
 
-    return pd.DataFrame(data)
+    # Generate LHS Matrix
+    keys = list(RANGES.keys())
+    n_dims = len(keys)
+    H = lhs(num_samples, n_dims, rng)
+
+    # Map [0,1] to actual ranges
+    data = {"id": np.arange(num_samples)}
+    for i, key in enumerate(keys):
+        vmin, vmax = RANGES[key]
+        data[key] = vmin + H[:, i] * (vmax - vmin)
+
+    # Add fixed constants
+    data["diff_pore"] = 1.0
+    data["diff_solid"] = 0.1
+
+    df = pd.DataFrame(data)
+    methods = ["physics"] * num_samples
+    num_grf = max(1, int(num_samples * 0.2))
+    for i in range(num_grf):
+        methods[i] = "GRF"
+
+    rng.shuffle(methods)
+    df["method"] = methods
+
+    return df
 
 
 # ==========================================
 # 2. GPU SOLVER & PHYSICS ENGINE
 # ==========================================
+
+
+def lhs(n_samples, n_dims, rng):
+    """Simple Latin Hypercube Sampling (NumPy only)."""
+    H = np.zeros((n_samples, n_dims))
+    for j in range(n_dims):
+        cut = np.linspace(0, 1, n_samples + 1)
+        u = rng.uniform(low=cut[:-1], high=cut[1:], size=n_samples)
+        P = rng.permutation(n_samples)
+        H[:, j] = u[P]
+    return H
 
 
 def get_gpu_solver_class():
@@ -184,11 +213,21 @@ def run_simulation(shape, global_cfg, row_params, seed, solver_cls):
     ani_z = row_params["anisotropy_z"]
     drying = row_params["drying_intensity"]
     v_scale = row_params["velocity_scale"]
+    evap_strength = row_params["evap_strength"]
+    redep_factor = row_params["redeposition_factor"]
+    z_mask_thresh = row_params["top_mask_zmin"]
 
     # 2. Initial Structure
     field = gaussian_random_field(shape, psd, (ani_z, 1.0, 1.0), seed)
     solid = field > np.quantile(field, porosity)
     solid_flat = solid.transpose(2, 1, 0).ravel()
+
+    if row_params["method"] == "GRF":
+        neighbors = np.zeros_like(solid, dtype=int)
+        for axis in range(3):
+            neighbors += np.roll(solid, 1, axis) + np.roll(solid, -1, axis)
+        solid = solid & (neighbors >= 2)
+        return (~solid).astype(np.uint8)
 
     # 3. FiPy Setup
     mesh = Grid3D(nx=nx, ny=ny, nz=nz, dx=1.0, dy=1.0, dz=1.0)
@@ -208,7 +247,7 @@ def run_simulation(shape, global_cfg, row_params, seed, solver_cls):
     # Evaporation (Exponential decay from top)
     z = np.array(mesh.cellCenters[2])
     z_norm = (z - z.min()) / (z.max() - z.min() + 1e-9)
-    evap = CellVariable(mesh=mesh, value=np.exp(-5.0 * (1.0 - z_norm)))
+    evap = CellVariable(mesh=mesh, value=np.exp(-evap_strength * (1.0 - z_norm)))
 
     # PDE
     eq = TransientTerm() == DiffusionTerm(D) - ConvectionTerm(
@@ -218,7 +257,7 @@ def run_simulation(shape, global_cfg, row_params, seed, solver_cls):
     # 5. Time Stepping
     dt = global_cfg["system"]["dt"]
     steps = global_cfg["system"]["time_steps"]
-    top_mask = z_norm > 0.8
+    top_mask = z_norm > z_mask_thresh
 
     for _ in range(steps):
         prev_mass = float(np.sum(binder.value))
@@ -229,7 +268,7 @@ def run_simulation(shape, global_cfg, row_params, seed, solver_cls):
         lost = max(0.0, prev_mass - curr_mass)
         if lost > 0:
             vals = binder.value.copy()
-            vals[top_mask] += 0.08 * drying * lost / (np.sum(top_mask) + 1e-9)
+            vals[top_mask] += redep_factor * drying * lost / (np.sum(top_mask) + 1e-9)
             binder.setValue(vals)
 
     # 6. Finalize Binary Structure
