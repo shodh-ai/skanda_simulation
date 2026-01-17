@@ -3,7 +3,7 @@
 MPI Taufactor Post-Processing Script.
 
 Usage:
-    mpirun -n <cores> python run_tau_mpi.py --input_dir <path_to_generated_files>
+    mpirun -n <cores> python run_tau.py --input_dir <path_to_generated_files>
 """
 
 import os
