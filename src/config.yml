@@ -5,8 +5,3 @@ run:
 
 system:
   volume_shape: [128, 128, 128]
-  voxel_size_um: 0.1
-
-  # Physics Time Integration (Fixed for stability)
-  time_steps: 30
-  dt: 0.05

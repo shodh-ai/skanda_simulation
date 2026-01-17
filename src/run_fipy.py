@@ -36,38 +36,46 @@ logger = logging.getLogger(__name__)
 def generate_parameter_manifest(num_samples, seed):
     """
     Generates a DataFrame of randomized parameters for the sweep.
-    Using Uniform sampling here, but effectively covers the space.
+    Expanded to cover all requested physical and temporal parameters.
     """
     rng = np.random.default_rng(seed)
 
-    # Define ranges (Min, Max) matching Code 1
+    # 1. Define all ranges
     RANGES = {
         "target_porosity": (0.20, 0.80),
+        "voxel_size_um": (0.08, 0.15),
         "psd_power": (0.8, 2.2),
+        "anisotropy_x": (0.7, 1.3),
+        "anisotropy_y": (0.7, 1.3),
         "anisotropy_z": (0.7, 1.3),
         "drying_intensity": (0.1, 0.7),
         "velocity_scale": (0.2, 1.0),
+        "time_steps": (20, 80),
+        "dt": (0.03, 0.10),
+        "diff_pore": (0.5, 1.5),
+        "diff_solid": (0.05, 0.30),
         "evap_strength": (4.0, 8.0),
         "redeposition_factor": (0.03, 0.12),
         "top_mask_zmin": (0.70, 0.85),
     }
 
-    # Generate LHS Matrix
+    # 2. Generate LHS Matrix
     keys = list(RANGES.keys())
     n_dims = len(keys)
     H = lhs(num_samples, n_dims, rng)
 
-    # Map [0,1] to actual ranges
+    # 3. Map [0,1] to actual ranges
     data = {"id": np.arange(num_samples)}
     for i, key in enumerate(keys):
         vmin, vmax = RANGES[key]
         data[key] = vmin + H[:, i] * (vmax - vmin)
 
-    # Add fixed constants
-    data["diff_pore"] = 1.0
-    data["diff_solid"] = 0.1
+    # 4. Enforce Integer Types where necessary
+    data["time_steps"] = data["time_steps"].astype(int)
 
     df = pd.DataFrame(data)
+
+    # 5. Assign Methods (Physics vs GRF)
     methods = ["physics"] * num_samples
     num_grf = max(1, int(num_samples * 0.2))
     for i in range(num_grf):
@@ -211,14 +219,20 @@ def run_simulation(shape, global_cfg, row_params, seed, solver_cls):
     porosity = row_params["target_porosity"]
     psd = row_params["psd_power"]
     ani_z = row_params["anisotropy_z"]
+    ani_y = row_params["anisotropy_y"]
+    ani_x = row_params["anisotropy_x"]
     drying = row_params["drying_intensity"]
     v_scale = row_params["velocity_scale"]
     evap_strength = row_params["evap_strength"]
     redep_factor = row_params["redeposition_factor"]
     z_mask_thresh = row_params["top_mask_zmin"]
+    diff_pore = row_params["diff_pore"]
+    diff_solid = row_params["diff_solid"]
+    dt = row_params["dt"]
+    steps = int(row_params["time_steps"])
 
     # 2. Initial Structure
-    field = gaussian_random_field(shape, psd, (ani_z, 1.0, 1.0), seed)
+    field = gaussian_random_field(shape, psd, (ani_z, ani_y, ani_x), seed)
     solid = field > np.quantile(field, porosity)
     solid_flat = solid.transpose(2, 1, 0).ravel()
 
@@ -238,8 +252,8 @@ def run_simulation(shape, global_cfg, row_params, seed, solver_cls):
     binder = CellVariable(mesh=mesh, value=0.1)
     binder.setValue(binder.value * (1.0 + 0.5 * solid_flat))
 
-    D = CellVariable(mesh=mesh, value=row_params["diff_pore"])
-    D.setValue(row_params["diff_solid"], where=solid_flat)
+    D = CellVariable(mesh=mesh, value=diff_pore)
+    D.setValue(diff_solid, where=solid_flat)
 
     # Convection (Upwards)
     velocity = FaceVariable(mesh=mesh, rank=1, value=(0.0, 0.0, v_scale * drying))
@@ -253,10 +267,6 @@ def run_simulation(shape, global_cfg, row_params, seed, solver_cls):
     eq = TransientTerm() == DiffusionTerm(D) - ConvectionTerm(
         velocity
     ) - ImplicitSourceTerm(0.2 * drying * evap)
-
-    # 5. Time Stepping
-    dt = global_cfg["system"]["dt"]
-    steps = global_cfg["system"]["time_steps"]
     top_mask = z_norm > z_mask_thresh
 
     for _ in range(steps):
