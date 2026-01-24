@@ -7,15 +7,24 @@ import pandas as pd
 import numpy as np
 import pybamm
 from mpi4py import MPI
+import fcntl
+from threading import Lock
+
+file_lock = Lock()
 
 # ==========================================
 # 1. CONFIGURATION
 # ==========================================
 
-N_CYCLES_MAX = 500
+N_CYCLES_MAX = 1000
 TERMINATION = "80% capacity"
-SAVE_FREQUENCY = 10  # Save to disk every N simulations
 CYCLES_TO_SAVE = ["first", "middle", "last"]
+EOL_FRACTION = 0.8
+RUL_FIT_WINDOW = 10
+
+SOLVER_MODE = "safe"
+SOLVER_RTOL = 1e-6
+SOLVER_ATOL = 1e-6
 
 EXPERIMENT = pybamm.Experiment(
     [
@@ -30,10 +39,32 @@ EXPERIMENT = pybamm.Experiment(
     termination=TERMINATION,
 )
 
-pybamm.set_logging_level("ERROR")
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s | [Rank %(rank)s] | %(message)s"
-)
+pybamm.set_logging_level("NOTICE")
+
+
+class RankFilter(logging.Filter):
+    def __init__(self, rank):
+        super().__init__()
+        self.rank = rank
+
+    def filter(self, record):
+        record.rank = self.rank
+        return True
+
+
+# Configure after MPI initialization
+def setup_logging(rank):
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s | [Rank %(rank)s] | %(message)s")
+    )
+    handler.addFilter(RankFilter(rank))
+
+    logger.addHandler(handler)
+
 
 # ==========================================
 # 2. UTILITIES (From your Code)
@@ -107,23 +138,48 @@ def estimate_eol_linear(
 
 
 def extract_cycle_data(cycle_sol):
+    """Extract cycle data with additional degradation metrics."""
     try:
-        return {
+        data = {
             "Time_h": cycle_sol["Time [h]"].data.tolist(),
             "Voltage_V": cycle_sol["Voltage [V]"].data.tolist(),
             "Current_A": cycle_sol["Current [A]"].data.tolist(),
         }
+        try:
+            data["SEI_thickness_m"] = cycle_sol["Total SEI thickness [m]"].data.tolist()
+        except:
+            pass
+
+        try:
+            data["LAM_neg_pct"] = cycle_sol[
+                "Loss of active material in negative electrode [%]"
+            ].data.tolist()
+        except:
+            pass
+
+        try:
+            data["LAM_pos_pct"] = cycle_sol[
+                "Loss of active material in positive electrode [%]"
+            ].data.tolist()
+        except:
+            pass
+
+        return data
     except Exception:
         return None
 
 
-def analyze_run_results(sol, parameter_values, eol_fraction=0.8):
+def analyze_run_results(sol, parameter_values, eol_fraction=0.8, rul_window=10):
+    """Enhanced analysis with SOH and RUL tracking per cycle."""
     results = {}
+
+    # Get nominal capacity
     try:
         cap_nom = float(parameter_values["Nominal cell capacity [A.h]"])
     except:
         cap_nom = np.nan
 
+    # Extract capacities per cycle
     cycles_idx = []
     caps_ah = []
 
@@ -132,36 +188,72 @@ def analyze_run_results(sol, parameter_values, eol_fraction=0.8):
         if cap is not None:
             cycles_idx.append(k + 1)
             caps_ah.append(cap)
+        else:
+            cycles_idx.append(k + 1)
+            caps_ah.append(np.nan)
 
-    if (np.isnan(cap_nom) or cap_nom <= 0) and len(caps_ah) > 0:
-        cap_nom = caps_ah[0]
+    cycles_arr = np.array(cycles_idx, dtype=float)
+    caps_arr = np.array(caps_ah, dtype=float)
 
-    cycles_arr = np.array(cycles_idx)
-    caps_arr = np.array(caps_ah)
+    # Use first valid capacity if nominal is unknown
+    if (np.isnan(cap_nom) or cap_nom <= 0) and np.any(~np.isnan(caps_arr)):
+        first_valid = caps_arr[~np.isnan(caps_arr)]
+        if len(first_valid) > 0:
+            cap_nom = first_valid[0]
 
+    # Calculate SOH per cycle
+    soh_pct = (
+        (caps_arr / cap_nom) * 100.0 if cap_nom > 0 else np.full_like(caps_arr, np.nan)
+    )
+
+    # Determine EoL
+    cap_eol = eol_fraction * cap_nom if cap_nom > 0 else np.nan
+    eol_measured = None
+    eol_pred = None
+
+    finite_mask = np.isfinite(caps_arr)
+    if np.any(finite_mask) and np.isfinite(cap_eol):
+        finite_cycles = cycles_arr[finite_mask]
+        finite_caps = caps_arr[finite_mask]
+        below = np.where(finite_caps <= cap_eol)[0]
+        if len(below) > 0:
+            eol_measured = int(finite_cycles[below[0]])
+        else:
+            eol_pred = estimate_eol_linear(
+                finite_cycles, finite_caps, cap_eol, window=rul_window
+            )
+
+    # Calculate RUL per cycle
+    rul_cycles = np.full_like(cycles_arr, np.nan, dtype=float)
+    if eol_measured is not None:
+        rul_cycles = np.maximum(eol_measured - cycles_arr, 0.0)
+    elif eol_pred is not None and np.isfinite(eol_pred):
+        rul_cycles = np.maximum(eol_pred - cycles_arr, 0.0)
+
+    # Store results
+    results["nominal_capacity_Ah"] = float(cap_nom) if np.isfinite(cap_nom) else None
+    results["eol_capacity_Ah"] = float(cap_eol) if np.isfinite(cap_eol) else None
+    results["eol_fraction"] = float(eol_fraction)
+    results["eol_cycle_measured"] = (
+        int(eol_measured) if eol_measured is not None else None
+    )
+    results["eol_cycle_predicted"] = (
+        float(eol_pred) if eol_pred is not None and np.isfinite(eol_pred) else None
+    )
+    results["n_valid_cycles"] = int(np.sum(finite_mask))
+
+    # Store per-cycle arrays
     results["capacity_trend_cycles"] = cycles_idx
     results["capacity_trend_ah"] = caps_ah
+    results["soh_trend_pct"] = soh_pct.tolist()
+    results["rul_trend_cycles"] = rul_cycles.tolist()
 
-    if len(caps_ah) == 0:
-        return results
-
-    cap_eol = eol_fraction * cap_nom
-    eol_measured = None
-    below = np.where(caps_arr <= cap_eol)[0]
-    if len(below) > 0:
-        eol_measured = int(cycles_arr[below[0]])
-
-    eol_pred = estimate_eol_linear(cycles_arr, caps_arr, cap_eol)
-
-    results["nominal_capacity_Ah"] = cap_nom
-    results["eol_cycle_measured"] = eol_measured
-    results["eol_cycle_predicted"] = eol_pred
-
-    current_cycle = cycles_arr[-1]
-    if eol_measured:
+    # Final RUL
+    if eol_measured is not None:
         results["final_RUL"] = 0
-    elif eol_pred:
-        results["final_RUL"] = max(0, eol_pred - current_cycle)
+    elif eol_pred is not None and np.isfinite(eol_pred):
+        current_cycle = cycles_arr[-1] if len(cycles_arr) > 0 else 0
+        results["final_RUL"] = max(0, float(eol_pred - current_cycle))
     else:
         results["final_RUL"] = None
 
@@ -181,38 +273,50 @@ def calculate_bruggeman(porosity, tau):
 
     try:
         b = 1 - (np.log(tau) / np.log(porosity))
-        # Clamp to avoid numerical instability in PyBaMM
         return max(0.5, min(b, 10.0))
     except:
         return 1.5
 
 
-def save_chunk(data_buffer, filepath):
-    if not data_buffer:
+def save_sample_result(sample_id, data_rows, output_dir):
+    """
+    Save all parameter results for a single sample to one parquet file.
+    Thread-safe and MPI-safe using file locking.
+    """
+    if not data_rows:
         return
-    df_chunk = pd.DataFrame(data_buffer)
-    # Ensure complex objects (lists) are handled if parquet engine complains,
-    # but pyarrow usually handles lists fine.
 
-    if os.path.exists(filepath):
+    filepath = os.path.join(output_dir, f"sample_{sample_id}.parquet")
+    df_new = pd.DataFrame(data_rows)
+
+    with file_lock:
         try:
-            df_existing = pd.read_parquet(filepath)
-            df_combined = pd.concat([df_existing, df_chunk], ignore_index=True)
-            df_combined.to_parquet(filepath, index=False)
-        except:
-            df_chunk.to_parquet(filepath, index=False)
-    else:
-        df_chunk.to_parquet(filepath, index=False)
+            if os.path.exists(filepath):
+                with open(filepath, "r+b") as f:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                    try:
+                        df_existing = pd.read_parquet(filepath)
+                        df_combined = pd.concat(
+                            [df_existing, df_new], ignore_index=True
+                        )
+                        df_combined.to_parquet(filepath, index=False)
+                    finally:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            else:
+                df_new.to_parquet(filepath, index=False)
+        except Exception as e:
+            logging.error(f"Error saving to {filepath}: {e}")
+            df_new.to_parquet(filepath, index=False)
 
 
-def get_completed_tasks(filepath):
-    """Returns set of (sample_id, param_id) tuples that are already done."""
+def get_completed_params_for_sample(sample_id, output_dir):
+    """Returns set of param_ids already completed for this sample."""
+    filepath = os.path.join(output_dir, f"sample_{sample_id}.parquet")
     if not os.path.exists(filepath):
         return set()
     try:
-        df = pd.read_parquet(filepath, columns=["sample_id", "param_id"])
-        # Create tuple set
-        return set(zip(df["sample_id"], df["param_id"]))
+        df = pd.read_parquet(filepath, columns=["param_id"])
+        return set(df["param_id"].values)
     except Exception:
         return set()
 
@@ -227,12 +331,14 @@ def main():
     rank = comm.Get_rank()
     size = comm.Get_size()
 
-    # Argument Parsing
+    # Setup logging for this rank
+    setup_logging(rank)
+
+    # Argument Parsing (only rank 0)
     input_tau_csv = "taufactor_results.csv"
     input_params_csv = "master_parameters.csv"
     output_dir = "final_output"
 
-    # Allow overriding via args
     if rank == 0:
         parser = argparse.ArgumentParser()
         parser.add_argument("--tau_csv", default=input_tau_csv)
@@ -247,12 +353,17 @@ def main():
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
-    # Broadcast config
+        logging.info(f"[Master] Starting MPI run with {size} ranks")
+        logging.info(f"[Master] Input tau CSV: {input_tau_csv}")
+        logging.info(f"[Master] Input params CSV: {input_params_csv}")
+        logging.info(f"[Master] Output directory: {output_dir}")
+
+    # Broadcast config to all ranks
     input_tau_csv = comm.bcast(input_tau_csv, root=0)
     input_params_csv = comm.bcast(input_params_csv, root=0)
     output_dir = comm.bcast(output_dir, root=0)
 
-    # 1. READ DATA
+    # 1. READ DATA (rank 0 loads, then distributes)
     my_structures = []
     all_params = []
 
@@ -260,13 +371,15 @@ def main():
         # Load all structures
         if os.path.exists(input_tau_csv):
             df_tau = pd.read_csv(input_tau_csv)
-            # Ensure we have consistent ID naming
+            # Ensure consistent ID naming
             if "id" in df_tau.columns:
                 df_tau.rename(columns={"id": "sample_id"}, inplace=True)
             structures_list = df_tau.to_dict("records")
-            print(f"[Master] Loaded {len(structures_list)} structures.")
+            logging.info(
+                f"[Master] Loaded {len(structures_list)} structures from {input_tau_csv}"
+            )
         else:
-            print(f"[Error] {input_tau_csv} not found.")
+            logging.error(f"[Master] {input_tau_csv} not found!")
             sys.exit(1)
 
         # Load all parameters
@@ -275,77 +388,104 @@ def main():
             if "param_id" not in df_params.columns:
                 df_params["param_id"] = np.arange(len(df_params))
             all_params = df_params.to_dict("records")
-            print(f"[Master] Loaded {len(all_params)} parameter sets.")
+            logging.info(
+                f"[Master] Loaded {len(all_params)} parameter sets from {input_params_csv}"
+            )
         else:
-            print(f"[Error] {input_params_csv} not found.")
+            logging.error(f"[Master] {input_params_csv} not found!")
             sys.exit(1)
 
-        # Split Structures among ranks
-        # We only split structures, every rank gets ALL parameters.
-        # This creates the cross-join effect distributedly.
+        # Split structures among ranks (each rank gets different samples)
+        # All ranks get ALL parameters (to create cross-join distributedly)
         structures_split = np.array_split(structures_list, size)
+        logging.info(f"[Master] Distributing samples across {size} ranks")
     else:
         structures_split = None
         all_params = None
 
-    # Scatter Structures
+    # Scatter structures (each rank gets subset of samples)
     my_structures = comm.scatter(structures_split, root=0)
-    # Broadcast Parameters
+    # Broadcast ALL parameters to all ranks
     all_params = comm.bcast(all_params, root=0)
 
-    # 2. CHECK RESUME STATUS
-    my_checkpoint_file = os.path.join(output_dir, f"results_rank_{rank}.parquet")
-    completed_set = get_completed_tasks(my_checkpoint_file)
+    if rank == 0:
+        logging.info(f"[Master] Data distribution complete")
 
-    # 3. WORK LOOP
-    local_buffer = []
-    total_tasks = len(my_structures) * len(all_params)
-    processed_count = 0
+    logging.info(f"[Rank {rank}] Received {len(my_structures)} samples to process")
+    logging.info(f"[Rank {rank}] Will run {len(all_params)} parameter sets per sample")
+    logging.info(f"[Rank {rank}] Total tasks: {len(my_structures) * len(all_params)}")
 
-    # Iterate Structures
-    for struct_row in my_structures:
+    # 2. WORK LOOP - Process by SAMPLE (each sample = one parquet file)
+    total_samples = len(my_structures)
+    overall_start = time.time()
+
+    for sample_idx, struct_row in enumerate(my_structures):
         s_id = struct_row.get("sample_id")
+        sample_start = time.time()
 
-        # Extract Structural properties for PyBaMM
-        # Assuming Positive Electrode based on context
+        logging.info(f"[Rank {rank}] ========================================")
+        logging.info(
+            f"[Rank {rank}] Processing sample {s_id} ({sample_idx+1}/{total_samples})"
+        )
+        logging.info(f"[Rank {rank}] ========================================")
+
+        # Check what's already completed for THIS sample
+        completed_params = get_completed_params_for_sample(s_id, output_dir)
+        remaining_params = len(all_params) - len(completed_params)
+
+        if len(completed_params) > 0:
+            logging.info(
+                f"[Rank {rank}] Sample {s_id}: Found {len(completed_params)} completed params, {remaining_params} remaining"
+            )
+
+        # Extract structural properties for PyBaMM
         porosity = struct_row.get("porosity_measured", 0.3)
         tau = struct_row.get("tau_factor", 1.5)
-        # Calculate Bruggeman b
         b_exp = calculate_bruggeman(porosity, tau)
 
-        # Iterate Parameters
-        for param_row in all_params:
+        logging.info(
+            f"[Rank {rank}] Sample {s_id}: porosity={porosity:.4f}, tau={tau:.4f}, bruggeman={b_exp:.4f}"
+        )
+
+        # Buffer for this sample's results
+        sample_results = []
+        params_processed = 0
+        params_skipped = 0
+        params_failed = 0
+
+        # Iterate all parameters for this sample
+        for param_idx, param_row in enumerate(all_params):
             p_id = param_row.get("param_id")
 
-            # Skip if done
-            if (s_id, p_id) in completed_set:
-                processed_count += 1
+            # Skip if already done
+            if p_id in completed_params:
+                params_skipped += 1
                 continue
 
             t0 = time.time()
 
-            # Prepare Output Row
+            # Prepare result row
             result_row = {
                 "sample_id": s_id,
                 "param_id": p_id,
                 "filename": struct_row.get("filename"),
+                "porosity": porosity,
+                "tau_factor": tau,
                 "bruggeman_derived": b_exp,
             }
-            # Copy input metadata into result
+            # Copy input metadata
             result_row.update({f"input_{k}": v for k, v in param_row.items()})
 
             # Setup PyBaMM
             parameter_values = pybamm.ParameterValues("Mohtat2020")
 
             # Update 1: From master_parameters.csv
-            # Filter out non-PyBaMM keys (ids, etc)
             p_dict = {
                 k: v for k, v in param_row.items() if k not in ["param_id", "key"]
             }
             parameter_values.update(p_dict, check_already_exists=False)
 
-            # Update 2: From Taufactor (Structure)
-            # We enforce the structural properties on the Positive Electrode
+            # Update 2: From structure (tau factor results)
             struct_updates = {
                 "Positive electrode porosity": porosity,
                 "Positive electrode Bruggeman coefficient (electrolyte)": b_exp,
@@ -354,16 +494,31 @@ def main():
             }
             parameter_values.update(struct_updates, check_already_exists=False)
 
-            # Build Model & Sim
+            # Build model
             model = pybamm.lithium_ion.DFN({"SEI": "ec reaction limited"})
             try:
-                parameter_values.set_initial_state(1)
+                parameter_values.set_initial_stoichiometries(1)
             except:
                 pass
 
-            sim = pybamm.Simulation(
-                model, experiment=EXPERIMENT, parameter_values=parameter_values
-            )
+            # Create simulation with enhanced solver options for stability
+            try:
+                sim = pybamm.Simulation(
+                    model,
+                    experiment=EXPERIMENT,
+                    parameter_values=parameter_values,
+                    solver=pybamm.CasadiSolver(
+                        mode=SOLVER_MODE, rtol=SOLVER_RTOL, atol=SOLVER_ATOL
+                    ),
+                )
+            except Exception as e:
+                # Fallback to default solver if CasadiSolver fails
+                logging.warning(
+                    f"[Rank {rank}] CasadiSolver failed for sample {s_id}, param {p_id}, using default"
+                )
+                sim = pybamm.Simulation(
+                    model, experiment=EXPERIMENT, parameter_values=parameter_values
+                )
 
             # Solve
             run_ok = True
@@ -374,22 +529,44 @@ def main():
                 sol = sim.solve()
             except Exception as e:
                 run_ok = False
-                error_message = str(e)
+                error_message = str(e)[:500]  # Limit error message length
+                params_failed += 1
+                logging.error(
+                    f"[Rank {rank}] Sample {s_id}, Param {p_id} FAILED: {error_message[:100]}..."
+                )
 
-            # Analyze
+            # Record results
             runtime = time.time() - t0
             result_row["status"] = "success" if run_ok else "failed"
             result_row["runtime_s"] = round(runtime, 2)
             result_row["error_message"] = error_message
 
+            # Analyze if successful
             if run_ok and sol:
                 try:
-                    analysis = analyze_run_results(sol, parameter_values)
+                    analysis = analyze_run_results(
+                        sol,
+                        parameter_values,
+                        eol_fraction=EOL_FRACTION,
+                        rul_window=RUL_FIT_WINDOW,
+                    )
                     result_row.update(analysis)
-                except Exception as e:
-                    result_row["error_message"] += f" | Analysis err: {e}"
 
-                # Extract Cycles
+                    if (param_idx + 1) % 20 == 0 or param_idx == 0:
+                        cycles_done = analysis.get("n_valid_cycles", "?")
+                        eol_meas = analysis.get("eol_cycle_measured", "N/A")
+                        eol_pred = analysis.get("eol_cycle_predicted", "N/A")
+                        logging.info(
+                            f"[Rank {rank}] Sample {s_id}, Param {p_id}: {cycles_done} cycles, EoL={eol_meas}/{eol_pred}, {runtime:.1f}s"
+                        )
+
+                except Exception as e:
+                    logging.warning(
+                        f"[Rank {rank}] Analysis failed for sample {s_id}, param {p_id}: {e}"
+                    )
+                    result_row["error_message"] += f" | Analysis err: {str(e)[:200]}"
+
+                # Extract selected cycles (first, middle, last)
                 num_cycles = len(sol.cycles)
                 indices_map = {
                     "first": 0,
@@ -399,30 +576,65 @@ def main():
                 for label in CYCLES_TO_SAVE:
                     idx = indices_map.get(label)
                     if idx is not None and 0 <= idx < num_cycles:
-                        # Serialize safely (might be large)
-                        # We convert to list to store in Parquet/JSON
                         c_data = extract_cycle_data(sol.cycles[idx])
-                        # Flattening for Parquet: Store as string or keep as list?
-                        # Parquet handles lists.
-                        result_row[f"cycle_{label}"] = c_data
+                        if c_data is not None:
+                            result_row[f"cycle_{label}"] = c_data
 
-            # Add to buffer
-            local_buffer.append(result_row)
-            processed_count += 1
+            sample_results.append(result_row)
+            params_processed += 1
 
-            # Periodic Save
-            if len(local_buffer) >= SAVE_FREQUENCY:
-                save_chunk(local_buffer, my_checkpoint_file)
-                local_buffer = []
-                print(f"[Rank {rank}] Progress: {processed_count}/{total_tasks}")
+            # Periodic progress log (every 10 params)
+            if params_processed % 10 == 0:
+                elapsed = time.time() - sample_start
+                avg_time = elapsed / params_processed
+                remaining = remaining_params - params_processed
+                eta = avg_time * remaining
+                logging.info(
+                    f"[Rank {rank}] Sample {s_id} progress: {params_processed}/{remaining_params} params ({params_failed} failed), ETA: {eta/60:.1f} min"
+                )
 
-    # Final Save
-    save_chunk(local_buffer, my_checkpoint_file)
-    print(f"[Rank {rank}] Completed.")
+        # Save all results for this sample to ONE parquet file
+        if sample_results:
+            save_sample_result(s_id, sample_results, output_dir)
+            sample_elapsed = time.time() - sample_start
+            logging.info(
+                f"[Rank {rank}] ✓ Sample {s_id} COMPLETE: {len(sample_results)} new results saved ({params_failed} failed, {params_skipped} skipped) in {sample_elapsed/60:.1f} min"
+            )
+        else:
+            logging.info(
+                f"[Rank {rank}] Sample {s_id}: No new results (all {len(completed_params)} params already done)"
+            )
 
+    # All samples done for this rank
+    overall_elapsed = time.time() - overall_start
+    logging.info(f"[Rank {rank}] ========================================")
+    logging.info(f"[Rank {rank}] ALL SAMPLES COMPLETE")
+    logging.info(
+        f"[Rank {rank}] Processed {total_samples} samples in {overall_elapsed/60:.1f} minutes"
+    )
+    logging.info(f"[Rank {rank}] ========================================")
+
+    # Wait for all ranks to finish
     comm.Barrier()
+
     if rank == 0:
-        print("[Master] All ranks finished. Data is in:", output_dir)
+        logging.info("[Master] ========================================")
+        logging.info("[Master] ALL RANKS FINISHED!")
+        logging.info(f"[Master] Results directory: {os.path.abspath(output_dir)}")
+        logging.info(
+            f"[Master] Output format: sample_<ID>.parquet (one file per sample)"
+        )
+
+        # Count output files
+        try:
+            parquet_files = [
+                f for f in os.listdir(output_dir) if f.endswith(".parquet")
+            ]
+            logging.info(f"[Master] Total parquet files created: {len(parquet_files)}")
+        except:
+            pass
+
+        logging.info("[Master] ========================================")
 
 
 if __name__ == "__main__":
