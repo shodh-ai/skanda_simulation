@@ -22,7 +22,7 @@ CYCLES_TO_SAVE = ["first", "middle", "last"]
 EOL_FRACTION = 0.8
 RUL_FIT_WINDOW = 10
 
-SOLVER_MODE = "safe"
+# Removed SOLVER_MODE - IDAKLU doesn't use mode parameter
 SOLVER_RTOL = 1e-6
 SOLVER_ATOL = 1e-6
 
@@ -501,20 +501,18 @@ def main():
             except:
                 pass
 
-            # Create simulation with enhanced solver options for stability
+            # Create simulation with IDAKLU solver
             try:
                 sim = pybamm.Simulation(
                     model,
                     experiment=EXPERIMENT,
                     parameter_values=parameter_values,
-                    solver=pybamm.CasadiSolver(
-                        mode=SOLVER_MODE, rtol=SOLVER_RTOL, atol=SOLVER_ATOL
-                    ),
+                    solver=pybamm.IDAKLUSolver(rtol=SOLVER_RTOL, atol=SOLVER_ATOL),
                 )
             except Exception as e:
-                # Fallback to default solver if CasadiSolver fails
+                # Fallback to default solver if IDAKLUSolver fails
                 logging.warning(
-                    f"[Rank {rank}] CasadiSolver failed for sample {s_id}, param {p_id}, using default"
+                    f"[Rank {rank}] IDAKLUSolver failed for sample {s_id}, param {p_id}, using default"
                 )
                 sim = pybamm.Simulation(
                     model, experiment=EXPERIMENT, parameter_values=parameter_values
