@@ -16,15 +16,11 @@ file_lock = Lock()
 # 1. CONFIGURATION
 # ==========================================
 
-N_CYCLES_MAX = 1000
+N_CYCLES_MAX = 5000
 TERMINATION = "80% capacity"
 CYCLES_TO_SAVE = ["first", "middle", "last"]
 EOL_FRACTION = 0.8
 RUL_FIT_WINDOW = 10
-
-# Removed SOLVER_MODE - IDAKLU doesn't use mode parameter
-SOLVER_RTOL = 1e-6
-SOLVER_ATOL = 1e-6
 
 EXPERIMENT = pybamm.Experiment(
     [
@@ -138,39 +134,19 @@ def estimate_eol_linear(
 
 
 def extract_cycle_data(cycle_sol):
-    """Extract cycle data with additional degradation metrics."""
+    """Extract cycle data."""
     try:
-        data = {
+        return {
             "Time_h": cycle_sol["Time [h]"].data.tolist(),
             "Voltage_V": cycle_sol["Voltage [V]"].data.tolist(),
             "Current_A": cycle_sol["Current [A]"].data.tolist(),
         }
-        try:
-            data["SEI_thickness_m"] = cycle_sol["Total SEI thickness [m]"].data.tolist()
-        except:
-            pass
-
-        try:
-            data["LAM_neg_pct"] = cycle_sol[
-                "Loss of active material in negative electrode [%]"
-            ].data.tolist()
-        except:
-            pass
-
-        try:
-            data["LAM_pos_pct"] = cycle_sol[
-                "Loss of active material in positive electrode [%]"
-            ].data.tolist()
-        except:
-            pass
-
-        return data
     except Exception:
         return None
 
 
 def analyze_run_results(sol, parameter_values, eol_fraction=0.8, rul_window=10):
-    """Enhanced analysis with SOH and RUL tracking per cycle."""
+    """Simplified analysis matching second script logic."""
     results = {}
 
     # Get nominal capacity
@@ -188,71 +164,43 @@ def analyze_run_results(sol, parameter_values, eol_fraction=0.8, rul_window=10):
         if cap is not None:
             cycles_idx.append(k + 1)
             caps_ah.append(cap)
-        else:
-            cycles_idx.append(k + 1)
-            caps_ah.append(np.nan)
-
-    cycles_arr = np.array(cycles_idx, dtype=float)
-    caps_arr = np.array(caps_ah, dtype=float)
 
     # Use first valid capacity if nominal is unknown
-    if (np.isnan(cap_nom) or cap_nom <= 0) and np.any(~np.isnan(caps_arr)):
-        first_valid = caps_arr[~np.isnan(caps_arr)]
-        if len(first_valid) > 0:
-            cap_nom = first_valid[0]
+    if (np.isnan(cap_nom) or cap_nom <= 0) and len(caps_ah) > 0:
+        cap_nom = caps_ah[0]
 
-    # Calculate SOH per cycle
-    soh_pct = (
-        (caps_arr / cap_nom) * 100.0 if cap_nom > 0 else np.full_like(caps_arr, np.nan)
-    )
+    cycles_arr = np.array(cycles_idx)
+    caps_arr = np.array(caps_ah)
+
+    # Store capacity trend
+    results["capacity_trend_cycles"] = cycles_idx
+    results["capacity_trend_ah"] = caps_ah
+
+    if len(caps_ah) == 0:
+        return results
 
     # Determine EoL
-    cap_eol = eol_fraction * cap_nom if cap_nom > 0 else np.nan
+    cap_eol = eol_fraction * cap_nom
     eol_measured = None
-    eol_pred = None
 
-    finite_mask = np.isfinite(caps_arr)
-    if np.any(finite_mask) and np.isfinite(cap_eol):
-        finite_cycles = cycles_arr[finite_mask]
-        finite_caps = caps_arr[finite_mask]
-        below = np.where(finite_caps <= cap_eol)[0]
-        if len(below) > 0:
-            eol_measured = int(finite_cycles[below[0]])
-        else:
-            eol_pred = estimate_eol_linear(
-                finite_cycles, finite_caps, cap_eol, window=rul_window
-            )
+    below = np.where(caps_arr <= cap_eol)[0]
+    if len(below) > 0:
+        eol_measured = int(cycles_arr[below[0]])
 
-    # Calculate RUL per cycle
-    rul_cycles = np.full_like(cycles_arr, np.nan, dtype=float)
-    if eol_measured is not None:
-        rul_cycles = np.maximum(eol_measured - cycles_arr, 0.0)
-    elif eol_pred is not None and np.isfinite(eol_pred):
-        rul_cycles = np.maximum(eol_pred - cycles_arr, 0.0)
+    eol_pred = estimate_eol_linear(cycles_arr, caps_arr, cap_eol, window=rul_window)
 
     # Store results
     results["nominal_capacity_Ah"] = float(cap_nom) if np.isfinite(cap_nom) else None
-    results["eol_capacity_Ah"] = float(cap_eol) if np.isfinite(cap_eol) else None
-    results["eol_fraction"] = float(eol_fraction)
-    results["eol_cycle_measured"] = (
-        int(eol_measured) if eol_measured is not None else None
-    )
+    results["eol_cycle_measured"] = eol_measured
     results["eol_cycle_predicted"] = (
         float(eol_pred) if eol_pred is not None and np.isfinite(eol_pred) else None
     )
-    results["n_valid_cycles"] = int(np.sum(finite_mask))
-
-    # Store per-cycle arrays
-    results["capacity_trend_cycles"] = cycles_idx
-    results["capacity_trend_ah"] = caps_ah
-    results["soh_trend_pct"] = soh_pct.tolist()
-    results["rul_trend_cycles"] = rul_cycles.tolist()
 
     # Final RUL
-    if eol_measured is not None:
+    current_cycle = cycles_arr[-1] if len(cycles_arr) > 0 else 0
+    if eol_measured:
         results["final_RUL"] = 0
-    elif eol_pred is not None and np.isfinite(eol_pred):
-        current_cycle = cycles_arr[-1] if len(cycles_arr) > 0 else 0
+    elif eol_pred:
         results["final_RUL"] = max(0, float(eol_pred - current_cycle))
     else:
         results["final_RUL"] = None
@@ -272,9 +220,9 @@ def calculate_bruggeman(porosity, tau):
         tau = 1.0
 
     try:
-        b = 1 - (np.log(tau) / np.log(porosity))
-        return max(0.5, min(b, 10.0))
-    except:
+        b = 1.0 - (np.log(tau) / np.log(porosity))
+        return float(np.clip(b, 1.4, 1.6))
+    except Exception:
         return 1.5
 
 
@@ -415,6 +363,14 @@ def main():
     logging.info(f"[Rank {rank}] Will run {len(all_params)} parameter sets per sample")
     logging.info(f"[Rank {rank}] Total tasks: {len(my_structures) * len(all_params)}")
 
+    solver = pybamm.IDAKLUSolver(
+        rtol=1e-6,
+        atol=1e-8,
+        on_extrapolation="warn",
+        on_failure="warn",
+    )
+    logging.info(f"[Rank {rank}] Using IDAKLUSolver with rtol=1e-6, atol=1e-8")
+
     # 2. WORK LOOP - Process by SAMPLE (each sample = one parquet file)
     total_samples = len(my_structures)
     overall_start = time.time()
@@ -497,9 +453,13 @@ def main():
             # Build model
             model = pybamm.lithium_ion.DFN({"SEI": "ec reaction limited"})
             try:
-                parameter_values.set_initial_stoichiometries(1)
+                parameter_values.set_initial_state(1.0)
             except:
                 pass
+
+            sol = None
+            solver_used = "IDAKLUSolver"
+            error_message = ""
 
             # Create simulation with IDAKLU solver
             try:
@@ -507,34 +467,20 @@ def main():
                     model,
                     experiment=EXPERIMENT,
                     parameter_values=parameter_values,
-                    solver=pybamm.IDAKLUSolver(rtol=SOLVER_RTOL, atol=SOLVER_ATOL),
+                    solver=solver,
                 )
-            except Exception as e:
-                # Fallback to default solver if IDAKLUSolver fails
-                logging.warning(
-                    f"[Rank {rank}] IDAKLUSolver failed for sample {s_id}, param {p_id}, using default"
-                )
-                sim = pybamm.Simulation(
-                    model, experiment=EXPERIMENT, parameter_values=parameter_values
-                )
-
-            # Solve
-            run_ok = True
-            error_message = ""
-            sol = None
-
-            try:
                 sol = sim.solve()
             except Exception as e:
-                run_ok = False
-                error_message = str(e)[:500]  # Limit error message length
+                error_message = str(e)[:500]
                 params_failed += 1
                 logging.error(
                     f"[Rank {rank}] Sample {s_id}, Param {p_id} FAILED: {error_message[:100]}..."
                 )
 
-            # Record results
             runtime = time.time() - t0
+            run_ok = sol is not None and getattr(sol, "all_ts", None) is not None
+
+            result_row["solver_used"] = solver_used
             result_row["status"] = "success" if run_ok else "failed"
             result_row["runtime_s"] = round(runtime, 2)
             result_row["error_message"] = error_message

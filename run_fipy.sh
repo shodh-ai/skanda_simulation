@@ -21,22 +21,9 @@ cd $SLURM_SUBMIT_DIR/src
 # 3. Verify PyAMGX loads
 python -c "import pyamgx; print('PyAMGX loaded successfully')"
 
-LOG_FILE="gpu_usage_log.csv"
-echo "Starting GPU monitoring to: $LOG_FILE"
-
-# Run nvidia-smi query every 1 second (-l 1) in the background (&)
-nvidia-smi --query-gpu=timestamp,name,pstate,utilization.gpu,utilization.memory,memory.total,memory.free,memory.used,power.draw \
-           --format=csv -l 1 > $LOG_FILE &
-
-# Save the Process ID (PID) of the monitor so we can kill it later
-MONITOR_PID=$!
-
 # 4. Run the Script
 # Your python script will detect all 8 GPUs automatically
 echo "Running Simulation..."
 python -u run_fipy.py --config config.yml
 
-kill $MONITOR_PID
-
 echo "Job finished at $(date)"
-echo "GPU Logs saved to $LOG_FILE"
