@@ -1,0 +1,7 @@
+run:
+  output_dir: "output_parameter_sweep"
+  num_samples: 100
+  base_seed: 5555
+
+system:
+  volume_shape: [128, 128, 128]
