@@ -1,0 +1,258 @@
+# =============================================================================
+# MATERIALS DATABASE — Si-GRAPHITE ANODE
+# =============================================================================
+
+# Each block defines ONE material with a short code.
+# Use these codes in the run config (carbon_type, si_grade, cadd_type, binder_type, etc.).
+# Units:
+#   density_g_cm3, young_modulus_GPa, li_diffusivity_m2_s, electrical_conductivity_S_m
+
+# -----------------------------------------------------------------------------
+# GRAPHITE / CARBON MATRIX GRADES
+# -----------------------------------------------------------------------------
+
+graphite_artificial:
+  family: "graphite"
+  description: "Artificial graphite, flake-like, typical for Si-graphite composites"
+  density_g_cm3: 2.10
+  young_modulus_GPa: 10.0
+  poisson_ratio: 0.23
+  aspect_ratio_mean: 5.0
+  aspect_ratio_std: 2.0
+  d002_nm: 0.336
+  Lc_nm: 150.0
+  La_nm: 50.0
+  electrical_conductivity_S_m: 1.0e4
+  li_diffusivity_m2_s: 1.0e-14
+  molar_mass_g_mol: 12.01
+  theoretical_capacity_mAh_g: 372.0
+
+graphite_natural:
+  family: "graphite"
+  description: "Natural flake graphite"
+  density_g_cm3: 2.20
+  young_modulus_GPa: 15.0
+  poisson_ratio: 0.22
+  aspect_ratio_mean: 8.0
+  aspect_ratio_std: 3.0
+  d002_nm: 0.336
+  Lc_nm: 120.0
+  La_nm: 40.0
+  electrical_conductivity_S_m: 8.0e3
+  li_diffusivity_m2_s: 8.0e-15
+  molar_mass_g_mol: 12.01
+  theoretical_capacity_mAh_g: 372.0
+
+graphite_mcmb:
+  family: "graphite"
+  description: "MCMB, near-spherical graphite"
+  density_g_cm3: 2.15
+  young_modulus_GPa: 8.0
+  poisson_ratio: 0.24
+  aspect_ratio_mean: 1.2
+  aspect_ratio_std: 0.2
+  d002_nm: 0.338
+  Lc_nm: 100.0
+  La_nm: 30.0
+  electrical_conductivity_S_m: 6.0e3
+  li_diffusivity_m2_s: 8.0e-15
+  molar_mass_g_mol: 12.01
+  theoretical_capacity_mAh_g: 372.0
+
+# -----------------------------------------------------------------------------
+# SILICON — BASE MATERIAL
+# -----------------------------------------------------------------------------
+
+si_base:
+  family: "silicon"
+  description: "Crystalline Si active material, size-dependent props computed in code"
+
+  density_g_cm3: 2.33
+  young_modulus_GPa: 160.0
+  poisson_ratio: 0.28
+  volume_expansion_factor: 2.80
+  molar_mass_g_mol: 28.09
+  theoretical_capacity_mAh_g: 3579.0
+
+  correlations:
+    D0: 1.0e-16 # reference Li diffusivity at d_ref
+    d_ref: 100.0 # reference diameter in nm
+    alpha: 0.30 # diffusivity scaling exponent
+    sigma0: 1560.0 # reference electrical conductivity (S/m) at d_ref
+    beta: 0.20 # conductivity scaling exponent
+
+  # Size-dependent properties — computed in generator, not set here.
+  # Correlations (fit to literature, d50 in nm):
+  #
+  #   BET_m2_g:
+  #     BET = 6000 / (density_g_cm3 * d50_nm)
+  #     # Assumes spherical particles, density = 2.33 g/cm³
+  #     # nano  (d50=100nm)  → ~25.7 m²/g
+  #     # sub   (d50=350nm)  → ~7.4  m²/g
+  #     # micro (d50=1000nm) → ~2.6  m²/g
+  #
+  #   li_diffusivity_m2_s:
+  #     D = D0 * exp(-alpha * ln(d50_nm / d_ref))
+  #     D0     = 1.0e-16   # reference diffusivity at d_ref
+  #     d_ref  = 100.0     # nm
+  #     alpha  = 0.30      # scaling exponent (empirical)
+  #     # nano  (d50=100nm)  → 1.0e-16 m²/s
+  #     # sub   (d50=350nm)  → ~7.0e-17 m²/s
+  #     # micro (d50=1000nm) → ~5.0e-17 m²/s
+  #
+  #   electrical_conductivity_S_m:
+  #     sigma = sigma0 * (d_ref / d50_nm) ** beta
+  #     sigma0 = 1.56e3   # S/m at d_ref
+  #     d_ref  = 100.0    # nm
+  #     beta   = 0.20     # weak size dependence
+  #     # nano  (d50=100nm)  → 1.56e3 S/m
+  #     # sub   (d50=350nm)  → ~1.15e3 S/m
+  #     # micro (d50=1000nm) → ~0.98e3 S/m
+
+  morphologies:
+    spherical:
+      roundness: 1.0
+    irregular:
+      roundness_range: [0.60, 0.90]
+      aspect_ratio_range: [1.0, 2.5]
+    porous:
+      internal_porosity_range: [0.30, 0.70]
+      pore_diameter_nm_range: [5.0, 50.0]
+
+# Coating materials for Si (used when si_coating_enabled == true)
+
+carbon_coating:
+  family: "coating"
+  description: "Amorphous / turbostratic carbon coating on Si"
+  density_g_cm3: 2.00
+  young_modulus_GPa: 50.0
+  poisson_ratio: 0.20
+  electrical_conductivity_S_m: 1.0e3
+  thickness_min_nm: 5.0
+  thickness_max_nm: 50.0
+  molar_mass_g_mol: 12.01
+
+siox_coating:
+  family: "coating"
+  description: "SiOx protective coating on Si"
+  density_g_cm3: 2.20
+  young_modulus_GPa: 70.0
+  poisson_ratio: 0.20
+  electrical_conductivity_S_m: 1.0e-8
+  thickness_min_nm: 2.0
+  thickness_max_nm: 20.0
+  x_min: 0.5 # SiO0.5
+  x_max: 2.0 # SiO2
+  molar_mass_g_mol: 44.09
+
+# -----------------------------------------------------------------------------
+# CONDUCTIVE ADDITIVES
+# -----------------------------------------------------------------------------
+
+cb_superp:
+  family: "conductive_additive"
+  description: "Super P carbon black"
+  density_g_cm3: 1.80
+  primary_particle_nm: 40.0
+  aggregate_size_nm: 200.0
+  BET_m2_g: 62.0
+  DBP_ml_100g: 190.0
+  electrical_conductivity_S_m: 1.0e4
+  molar_mass_g_mol: 12.01
+
+cb_c65:
+  family: "conductive_additive"
+  description: "C65 carbon black"
+  density_g_cm3: 1.80
+  primary_particle_nm: 65.0
+  aggregate_size_nm: 300.0
+  BET_m2_g: 58.0
+  DBP_ml_100g: 190.0
+  electrical_conductivity_S_m: 8.0e3
+  molar_mass_g_mol: 12.01
+
+cb_ketjenblack:
+  family: "conductive_additive"
+  description: "Ketjenblack carbon black"
+  density_g_cm3: 1.70
+  primary_particle_nm: 30.0
+  aggregate_size_nm: 100.0
+  BET_m2_g: 900.0
+  DBP_ml_100g: 490.0
+  electrical_conductivity_S_m: 3.0e4
+  molar_mass_g_mol: 12.01
+
+cnt_multiwalled:
+  family: "conductive_additive"
+  description: "Multi-walled carbon nanotubes"
+  density_g_cm3: 1.90
+  diameter_nm_mean: 20.0
+  length_um_mean: 5.0
+  electrical_conductivity_S_m: 5.0e4
+  aspect_ratio_mean: 250.0
+  molar_mass_g_mol: 12.01
+
+graphene_flakes:
+  family: "conductive_additive"
+  description: "Graphene nano-flakes"
+  density_g_cm3: 2.20
+  lateral_size_nm_mean: 500.0
+  thickness_nm_mean: 1.0
+  electrical_conductivity_S_m: 1.0e5
+  aspect_ratio_mean: 500.0
+  molar_mass_g_mol: 12.01
+
+# -----------------------------------------------------------------------------
+# BINDERS
+# -----------------------------------------------------------------------------
+
+pvdf_kynar:
+  family: "binder"
+  description: "PVDF binder (Kynar-type), NMP-based"
+  density_g_cm3: 1.78
+  elastic_modulus_MPa: 1300.0
+  poisson_ratio: 0.35
+  film_thickness_min_nm: 5.0
+  film_thickness_max_nm: 50.0
+  repeat_unit_mass_g_mol: 64.03
+
+cmc_sbr:
+  family: "binder"
+  description: "CMC/SBR blend binder, water-based"
+  density_g_cm3: 1.59
+  elastic_modulus_MPa: 800.0
+  poisson_ratio: 0.35
+  film_thickness_min_nm: 5.0
+  film_thickness_max_nm: 30.0
+  repeat_unit_mass_g_mol: 242.20
+
+# -----------------------------------------------------------------------------
+# SEI (EFFECTIVE MATERIAL)
+# -----------------------------------------------------------------------------
+
+sei_generic:
+  family: "sei"
+  description: "Effective SEI composite (Li2CO3/LiF/Li2O/LiOH mix)"
+  density_g_cm3: 2.10
+  li_ionic_conductivity_S_m: 1.0e-7
+  electronic_conductivity_S_m: 1.0e-10
+  thickness_fresh_min_nm: 5.0
+  thickness_fresh_max_nm: 20.0
+  thickness_aged_min_nm: 20.0
+  thickness_aged_max_nm: 100.0
+  molar_mass_g_mol: 73.89
+
+# -----------------------------------------------------------------------------
+# CURRENT COLLECTOR
+# -----------------------------------------------------------------------------
+
+cu_foil:
+  family: "current_collector"
+  description: "Electrolytic copper foil"
+  density_g_cm3: 8.96
+  electrical_conductivity_S_m: 5.96e7
+  thickness_min_um: 6.0
+  thickness_max_um: 20.0
+  surface_roughness_Ra_nm_min: 50.0
+  surface_roughness_Ra_nm_max: 500.0
+  molar_mass_g_mol: 63.55
