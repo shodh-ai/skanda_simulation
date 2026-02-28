@@ -63,7 +63,7 @@ Outputs stored in a `CompositionState` dataclass. Capacity is a sanity check —
 
 ---
 
-### Step 1 — `DomainGeometry`
+### Step 1 — [DomainGeometry](./step_1.md)
 
 ```
 pre_calender_domain = Box(
