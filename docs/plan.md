@@ -77,7 +77,7 @@ All particle placement happens in this expanded box. The Z compression comes lat
 
 ---
 
-### Step 2 — `CarbonScaffoldPacker` (RSA oblate spheroids)
+### Step 2 — [CarbonScaffoldPacker](./step_2.md) (RSA oblate spheroids)
 
 **Data structure for each particle:**
 
@@ -150,7 +150,7 @@ Target: fill pre-calendering domain to φ_solid_pre = 42%. RSA for oblate sphero
 
 ---
 
-### Step 3 — `SiVfMapper` (statistical, not RSA)
+### Step 3 — [SiVfMapper](./step_3.md) (statistical, not RSA)
 
 Generates a Si volume-fraction map `si_vf[Nx, Ny, Nz]` where `Nx = voxel_resolution = 128`.
 

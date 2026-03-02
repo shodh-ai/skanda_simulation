@@ -5,6 +5,12 @@ from .generation import (
     build_domain,
     pack_carbon_scaffold,
     OblateSpheroid,
+    PHASE_CARBON,
+    map_si_distribution,
+    PHASE_PORE,
+    PHASE_COATING,
+    PHASE_GRAPHITE,
+    PHASE_SI,
 )
 
 __all__ = [
@@ -16,4 +22,10 @@ __all__ = [
     "build_domain",
     "pack_carbon_scaffold",
     "OblateSpheroid",
+    "PHASE_CARBON",
+    "map_si_distribution",
+    "PHASE_PORE",
+    "PHASE_COATING",
+    "PHASE_GRAPHITE",
+    "PHASE_SI",
 ]
