@@ -1,6 +1,6 @@
 # Step 1: Domain Geometry
 
-**File:** `structure/step_1_domain.py`
+**File:** `structure/domain.py`
 
 This module defines the physical stage upon which the simulation is enacted. It establishes the coordinate system, boundary conditions, and the spatial transformation representing the manufacturing process (calendering).
 
@@ -125,8 +125,8 @@ $$
 This step is lightweight but foundational. It does not perform heavy computation; it simply configures the space.
 
 ```python
-from structure.step_0_composition import compute_composition
-from structure.step_1_domain import build_domain
+from structure.composition import compute_composition
+from structure.domain import build_domain
 
 # 1. Get Physics State
 comp_state = compute_composition(resolved_sim)

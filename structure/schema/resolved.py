@@ -49,6 +49,7 @@ class ResolvedCarbon:
     material: GraphiteMaterial
     d50_nm: float
     size_cv: float
+    orientation_degree: float
 
 
 @dataclass
@@ -145,6 +146,7 @@ def resolve(cfg: RunConfig, db: MaterialsDB) -> ResolvedSimulation:
         material=db.get_graphite(cfg.carbon_type.value),
         d50_nm=cfg.carbon_particle_d50_nm,
         size_cv=cfg.carbon_particle_size_cv,
+        orientation_degree=cfg.carbon_orientation_degree,
     )
 
     composition = ResolvedComposition(

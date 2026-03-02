@@ -111,6 +111,9 @@ class CompositionState:
     carbon_aspect_ratio: float
     carbon_V_median_nm3: float  # volume of the median particle (d50)
     carbon_V_mean_nm3: float  # PSD-corrected mean volume
+    carbon_size_cv: (
+        float  # coefficient of variation of carbon particle size distribution
+    )
 
     # ── Si particle geometry ───────────────────────────────────────────────
     si_d50_nm: float
@@ -329,6 +332,7 @@ def compute_composition(sim: ResolvedSimulation) -> CompositionState:
     carbon_a = carbon_d50 / 2.0
     carbon_ar = cb.material.aspect_ratio_mean
     carbon_c = carbon_a / carbon_ar
+    carbon_size_cv = cb.size_cv
 
     V_carbon_med = _oblate_spheroid_volume(carbon_a, carbon_ar)
     V_carbon_mean = V_carbon_med * _lognormal_d3_correction(cb.size_cv)
@@ -408,6 +412,7 @@ def compute_composition(sim: ResolvedSimulation) -> CompositionState:
         carbon_aspect_ratio=carbon_ar,
         carbon_V_median_nm3=V_carbon_med,
         carbon_V_mean_nm3=V_carbon_mean,
+        carbon_size_cv=carbon_size_cv,
         si_d50_nm=si_d50,
         si_r_nm=si_r,
         si_V_median_nm3=V_si_med,

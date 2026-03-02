@@ -134,6 +134,10 @@ carbon_particle_size_cv:
 
 carbon_type: "graphite_artificial" # Options: graphite_artificial | graphite_natural | graphite_mcmb
 
+carbon_orientation_degree:
+  0.60 # 0.0 = random | 1.0 = perfectly aligned to Z
+  # Range: 0.0 – 1.0
+
 # =============================================================================
 # CONDUCTIVE ADDITIVE
 # =============================================================================

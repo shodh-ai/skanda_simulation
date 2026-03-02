@@ -202,6 +202,12 @@ class RunConfig(BaseModel):
         ..., ge=0.15, le=0.45, description="Overrides DB size_cv when set"
     )
     carbon_type: CarbonType
+    carbon_orientation_degree: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="c-axis alignment toward Z. 0=random, 1=perfectly aligned.",
+    )
 
     # --- Conductive Additive ---
     conductive_additive_type: ConductiveAdditiveType

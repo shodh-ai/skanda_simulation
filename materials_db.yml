@@ -26,6 +26,8 @@ graphite_artificial:
   li_diffusivity_m2_s: 1.0e-14
   molar_mass_g_mol: 12.01
   theoretical_capacity_mAh_g: 372.0
+  vis_color_hex: "#4A4A4A" # dark grey
+  vis_color_rgb: [74, 74, 74]
 
 graphite_natural:
   family: "graphite"
@@ -42,6 +44,8 @@ graphite_natural:
   li_diffusivity_m2_s: 8.0e-15
   molar_mass_g_mol: 12.01
   theoretical_capacity_mAh_g: 372.0
+  vis_color_hex: "#636363" # Medium Grey (lighter than artificial)
+  vis_color_rgb: [99, 99, 99]
 
 graphite_mcmb:
   family: "graphite"
@@ -58,6 +62,8 @@ graphite_mcmb:
   li_diffusivity_m2_s: 8.0e-15
   molar_mass_g_mol: 12.01
   theoretical_capacity_mAh_g: 372.0
+  vis_color_hex: "#363636" # Very Dark Grey (dense spheres)
+  vis_color_rgb: [54, 54, 54]
 
 # -----------------------------------------------------------------------------
 # SILICON — BASE MATERIAL
@@ -73,6 +79,8 @@ si_base:
   volume_expansion_factor: 2.80
   molar_mass_g_mol: 28.09
   theoretical_capacity_mAh_g: 3579.0
+  vis_color_hex: "#B0C4DE" # light steel blue
+  vis_color_rgb: [176, 196, 222]
 
   correlations:
     D0: 1.0e-16 # reference Li diffusivity at d_ref
@@ -131,6 +139,8 @@ carbon_coating:
   thickness_min_nm: 5.0
   thickness_max_nm: 50.0
   molar_mass_g_mol: 12.01
+  vis_color_hex: "#2F2F2F" # near-black carbon shell
+  vis_color_rgb: [47, 47, 47]
 
 siox_coating:
   family: "coating"
@@ -144,6 +154,8 @@ siox_coating:
   x_min: 0.5 # SiO0.5
   x_max: 2.0 # SiO2
   molar_mass_g_mol: 44.09
+  vis_color_hex: "#ADD8E6" # light blue
+  vis_color_rgb: [173, 216, 230]
 
 # -----------------------------------------------------------------------------
 # CONDUCTIVE ADDITIVES
@@ -159,6 +171,8 @@ cb_superp:
   DBP_ml_100g: 190.0
   electrical_conductivity_S_m: 1.0e4
   molar_mass_g_mol: 12.01
+  vis_color_hex: "#1A1A1A" # very dark — CB appears darkest in BSE
+  vis_color_rgb: [26, 26, 26]
 
 cb_c65:
   family: "conductive_additive"
@@ -170,6 +184,8 @@ cb_c65:
   DBP_ml_100g: 190.0
   electrical_conductivity_S_m: 8.0e3
   molar_mass_g_mol: 12.01
+  vis_color_hex: "#1A1A1A"
+  vis_color_rgb: [26, 26, 26]
 
 cb_ketjenblack:
   family: "conductive_additive"
@@ -181,6 +197,8 @@ cb_ketjenblack:
   DBP_ml_100g: 490.0
   electrical_conductivity_S_m: 3.0e4
   molar_mass_g_mol: 12.01
+  vis_color_hex: "#1A1A1A"
+  vis_color_rgb: [26, 26, 26]
 
 cnt_multiwalled:
   family: "conductive_additive"
@@ -191,6 +209,8 @@ cnt_multiwalled:
   electrical_conductivity_S_m: 5.0e4
   aspect_ratio_mean: 250.0
   molar_mass_g_mol: 12.01
+  vis_color_hex: "#0D0D0D"
+  vis_color_rgb: [13, 13, 13]
 
 graphene_flakes:
   family: "conductive_additive"
@@ -201,6 +221,8 @@ graphene_flakes:
   electrical_conductivity_S_m: 1.0e5
   aspect_ratio_mean: 500.0
   molar_mass_g_mol: 12.01
+  vis_color_hex: "#0D0D0D"
+  vis_color_rgb: [13, 13, 13]
 
 # -----------------------------------------------------------------------------
 # BINDERS
@@ -215,6 +237,8 @@ pvdf_kynar:
   film_thickness_min_nm: 5.0
   film_thickness_max_nm: 50.0
   repeat_unit_mass_g_mol: 64.03
+  vis_color_hex: "#F5DEB3" # wheat
+  vis_color_rgb: [245, 222, 179]
 
 cmc_sbr:
   family: "binder"
@@ -225,6 +249,8 @@ cmc_sbr:
   film_thickness_min_nm: 5.0
   film_thickness_max_nm: 30.0
   repeat_unit_mass_g_mol: 242.20
+  vis_color_hex: "#DEB887" # burlywood
+  vis_color_rgb: [222, 184, 135]
 
 # -----------------------------------------------------------------------------
 # SEI (EFFECTIVE MATERIAL)
@@ -241,6 +267,8 @@ sei_generic:
   thickness_aged_min_nm: 20.0
   thickness_aged_max_nm: 100.0
   molar_mass_g_mol: 73.89
+  vis_color_hex: "#90EE90" # light green
+  vis_color_rgb: [144, 238, 144]
 
 # -----------------------------------------------------------------------------
 # CURRENT COLLECTOR
@@ -256,3 +284,5 @@ cu_foil:
   surface_roughness_Ra_nm_min: 50.0
   surface_roughness_Ra_nm_max: 500.0
   molar_mass_g_mol: 63.55
+  vis_color_hex: "#B87333" # copper
+  vis_color_rgb: [184, 115, 51]

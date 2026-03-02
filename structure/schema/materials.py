@@ -31,6 +31,8 @@ class GraphiteMaterial(BaseModel):
     li_diffusivity_m2_s: float = Field(..., gt=0)
     molar_mass_g_mol: float = Field(..., gt=0)
     theoretical_capacity_mAh_g: float = Field(..., gt=0)
+    vis_color_hex: str
+    vis_color_rgb: list[int]
 
 
 class SiMorphologyDetail(BaseModel):
@@ -61,6 +63,8 @@ class SiBaseMaterial(BaseModel):
     volume_expansion_factor: float = Field(..., ge=1.0)
     molar_mass_g_mol: float = Field(..., gt=0)
     theoretical_capacity_mAh_g: float = Field(..., gt=0)
+    vis_color_hex: str
+    vis_color_rgb: list[int]
     morphologies: dict[str, SiMorphologyDetail]
     correlations: SiCorrelations
 
@@ -91,6 +95,8 @@ class CoatingMaterial(BaseModel):
     x_min: Optional[float] = None  # SiOx only
     x_max: Optional[float] = None
     molar_mass_g_mol: float = Field(..., gt=0)
+    vis_color_hex: str
+    vis_color_rgb: list[int]
 
 
 class ConductiveAdditiveMaterial(BaseModel):
@@ -111,6 +117,8 @@ class ConductiveAdditiveMaterial(BaseModel):
     lateral_size_nm_mean: Optional[float] = None
     thickness_nm_mean: Optional[float] = None
     molar_mass_g_mol: float = Field(..., gt=0)
+    vis_color_hex: str
+    vis_color_rgb: list[int]
 
 
 class BinderMaterial(BaseModel):
@@ -122,6 +130,8 @@ class BinderMaterial(BaseModel):
     film_thickness_min_nm: float = Field(..., gt=0)
     film_thickness_max_nm: float = Field(..., gt=0)
     repeat_unit_mass_g_mol: float = Field(..., gt=0)
+    vis_color_hex: str
+    vis_color_rgb: list[int]
 
 
 class SEIMaterial(BaseModel):
@@ -135,6 +145,8 @@ class SEIMaterial(BaseModel):
     thickness_aged_min_nm: float
     thickness_aged_max_nm: float
     molar_mass_g_mol: float = Field(..., gt=0)
+    vis_color_hex: str
+    vis_color_rgb: list[int]
 
 
 class CurrentCollectorMaterial(BaseModel):
@@ -147,6 +159,8 @@ class CurrentCollectorMaterial(BaseModel):
     surface_roughness_Ra_nm_min: float
     surface_roughness_Ra_nm_max: float
     molar_mass_g_mol: float = Field(..., gt=0)
+    vis_color_hex: str
+    vis_color_rgb: list[int]
 
 
 # ---------------------------------------------------------------------------
