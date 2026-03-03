@@ -180,7 +180,7 @@ Carbon is placed as a shell around Si — the RSA order flips: Si cores placed f
 
 ---
 
-### Step 4 — `CBDBinder_Fill` (GRF phase fill)
+### Step 4 — [CBDBinder_Fill](./step_4.md) (GRF phase fill)
 
 Fills interstitial space (not occupied by carbon or Si-void zones) with CBD.
 
@@ -197,7 +197,7 @@ For `binder_distribution="necks"`:
 
 ---
 
-### Step 5 — `CalenderingTransform`
+### Step 5 — [CalenderingTransform](./step_5.md)
 
 **Coordinate transform** on all particle centers and axes:
 
@@ -221,7 +221,7 @@ def calender(particles, compression_ratio, particle_deformation):
 
 ---
 
-### Step 6 — `SEIShellAdder`
+### Step 6 — [SEIShellAdder](./step_6.md)
 
 ```
 1. Compute surface voxels of carbon + Si using binary dilation - original
@@ -233,7 +233,7 @@ def calender(particles, compression_ratio, particle_deformation):
 
 ---
 
-### Step 7 — `PercolationValidator`
+### Step 7 — [PercolationValidator](./step_7.md)
 
 ```
 1. Build binary solid mask (carbon + Si + CBD)
@@ -245,7 +245,7 @@ def calender(particles, compression_ratio, particle_deformation):
 
 ---
 
-### Step 8 — `Voxelizer`
+### Step 8 — [Voxelizer](./step_8.md)
 
 ```
 Inputs: particle list (physical nm coords) + vf maps for sub-voxel phases
@@ -277,7 +277,6 @@ structure/
     sei.py                 # Step 6: SEIShellAdder
     percolation.py         # Step 7: PercolationValidator
     voxelizer.py           # Step 8: Voxelizer
-    utils.py               # OblateSpheroid dataclass, spatial grid, vMF sampler, GRF
 ```
 
 The top-level `generate_si_graphite(sim)` calls steps 0–8 in sequence, handles the percolation retry loop, and returns `(label_map, si_vf_map, metadata_dict)` where `metadata_dict` carries the moles, capacity, actual porosity, and coordination number for use as ML labels.
