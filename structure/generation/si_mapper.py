@@ -43,17 +43,8 @@ from structure.schema.resolved import ResolvedSimulation
 
 from .composition import CompositionState
 from .domain import DomainGeometry
-from .carbon_packer import OblateSpheroid, PackingResult, PHASE_CARBON
-
-
-# ---------------------------------------------------------------------------
-# Phase IDs (consistent with carbon_packer and future steps)
-# ---------------------------------------------------------------------------
-
-PHASE_PORE: int = 0
-PHASE_GRAPHITE: int = 1
-PHASE_SI: int = 2
-PHASE_COATING: int = 3
+from .carbon_packer import OblateSpheroid, PackingResult
+from ..phases import PHASE_GRAPHITE
 
 
 # ---------------------------------------------------------------------------
@@ -222,8 +213,6 @@ class SiVfMapper:
 
         target_inside = comp.vf_si / comp.vf_carbon
         cv = sim.sei_uniformity_cv if hasattr(sim, "sei_uniformity_cv") else 0.0
-        # Use Si-specific uniformity: not SEI — use a neutral small cv
-        # TODO: add si_loading_uniformity_cv to config if fine control needed
         spatial_cv = 0.10
 
         si_vf = np.zeros((nx, ny, nz), dtype=np.float64)

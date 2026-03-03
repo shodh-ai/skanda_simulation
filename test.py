@@ -1,27 +1,19 @@
 """
-Single test script — runs Steps 0–3 sequentially and produces all outputs.
+Full pipeline test — Steps 0-8.
 
-Steps:
-  0. CompositionCalculator  → comp
-  1. DomainGeometry         → domain
-  2. CarbonScaffoldPacker   → packing result + carbon_label (uint8 128³)
-  3. SiVfMapper             → si_vf, coating_vf, void_mask
+Outputs:
+  output/microstructure.npz        final label_map uint8 + vf maps float16
+  output/microstructure_viewer.html interactive Plotly viewer
 
-Outputs (all in ./output/):
-  carbon_scaffold.npz          3D label volume (uint8) + metadata
-  si_map_result.npz            si_vf float32 + coating_vf + void_mask
-  slice_orthogonal_3panel.png  Carbon-only XY/XZ/YZ BSE slices
-  slice_si_3panel.png          Si+Carbon composite BSE slices
-  si_vf_histogram.png          Distribution of non-zero si_vf values
-  particles_3d.html            Interactive 3D: carbon ellipsoids only
-  particles_3d_with_si.html    Interactive 3D: carbon + Si isosurface
+Run:
+  python test.py
 """
 
 from __future__ import annotations
 
+import sys
+import time
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 import plotly.graph_objects as go
 from pathlib import Path
 from skimage.measure import marching_cubes
@@ -29,84 +21,67 @@ from skimage.measure import marching_cubes
 from structure.schema import load_run_config, load_materials_db, resolve
 from structure.generation.composition import compute_composition
 from structure.generation.domain import build_domain
-from structure.generation.carbon_packer import (
-    pack_carbon_scaffold,
-    OblateSpheroid,
-    PHASE_CARBON,
-)
-from structure.generation.si_mapper import (
-    map_si_distribution,
+from structure.generation.carbon_packer import pack_carbon_scaffold, OblateSpheroid
+from structure.generation.si_mapper import map_si_distribution
+from structure.generation.cbd_binder import fill_cbd_binder
+from structure.generation.calendering import apply_calendering
+from structure.generation.sei import add_sei_shell
+from structure.generation.percolation import validate_percolation, PercolationFailed
+from structure.generation.voxelizer import voxelize_microstructure
+from structure.phases import (
     PHASE_PORE,
     PHASE_GRAPHITE,
     PHASE_SI,
-    PHASE_COATING,
+    PHASE_CBD,
+    PHASE_NAMES,
 )
 
-# ── Output directory ──────────────────────────────────────────────────────────
 OUT = Path("output")
 OUT.mkdir(exist_ok=True)
 
 # =============================================================================
-# LOAD CONFIG + DB
+# HELPERS
 # =============================================================================
-cfg = load_run_config("str_gen_config.yml")
-db = load_materials_db("materials_db.yml")
-sim = resolve(cfg, db)
-
-# =============================================================================
-# STEP 0 — Composition
-# =============================================================================
-comp = compute_composition(sim)
-print(comp.summary())
-comp.raise_if_critical()
-
-# =============================================================================
-# STEP 1 — Domain
-# =============================================================================
-domain = build_domain(comp)
-print(domain.summary())
-
-# =============================================================================
-# STEP 2 — Carbon Scaffold Packing
-# =============================================================================
-rng = np.random.default_rng(sim.seed)
-packing = pack_carbon_scaffold(comp, domain, sim, rng)
-print(packing.summary())
 
 
-# ── Voxelize carbon particles → uint8 label map ───────────────────────────────
-def voxelize_particles(
+def _voxelize_carbon_only(
     particles: list[OblateSpheroid],
     domain,
     compression_ratio: float,
 ) -> np.ndarray:
     """
-    Rasterize oblate spheroids into a uint8 label volume.
-    Each voxel center tested analytically against every particle.
-    Z compressed: z_final = z_pre × compression_ratio.
-    Periodic boundary in X, Y.
+    Lightweight carbon-only rasterizer used to feed Steps 3-6.
+    Step 8 does the authoritative full voxelization.
     """
     nx, ny, nz = domain.nx, domain.ny, domain.nz
     vs = domain.voxel_size_nm
-    volume = np.zeros((nx, ny, nz), dtype=np.uint8)
-
-    xs = (np.arange(nx) + 0.5) * vs
-    ys = (np.arange(ny) + 0.5) * vs
-    zs = (np.arange(nz) + 0.5) * vs
-    Xg, Yg, Zg = np.meshgrid(xs, ys, zs, indexing="ij")
-
-    Lx, Ly = domain.Lx_nm, domain.Ly_nm
+    Lx = domain.Lx_nm
+    Ly = domain.Ly_nm
+    vol = np.zeros((nx, ny, nz), dtype=np.uint8)
 
     for p in particles:
         cx = p.center[0]
         cy = p.center[1]
         cz = p.center[2] * compression_ratio
+        half = int(np.ceil(p.a / vs)) + 1
 
-        dx = Xg - cx
-        dx = dx - Lx * np.round(dx / Lx)
-        dy = Yg - cy
-        dy = dy - Ly * np.round(dy / Ly)
-        dz = Zg - cz
+        lx = np.arange(int(cx / vs) - half, int(cx / vs) + half + 1)
+        ly = np.arange(int(cy / vs) - half, int(cy / vs) + half + 1)
+        lz = np.arange(int(cz / vs) - half, int(cz / vs) + half + 1)
+        lz = lz[(lz >= 0) & (lz < nz)]
+        if lz.size == 0:
+            continue
+
+        xs = (lx + 0.5) * vs
+        ys = (ly + 0.5) * vs
+        zs = (lz + 0.5) * vs
+        Xs, Ys, Zs = np.meshgrid(xs, ys, zs, indexing="ij")
+
+        dx = Xs - cx
+        dx -= Lx * np.round(dx / Lx)
+        dy = Ys - cy
+        dy -= Ly * np.round(dy / Ly)
+        dz = Zs - cz
 
         RT = p.R.T
         dx_b = RT[0, 0] * dx + RT[0, 1] * dy + RT[0, 2] * dz
@@ -114,387 +89,562 @@ def voxelize_particles(
         dz_b = RT[2, 0] * dx + RT[2, 1] * dy + RT[2, 2] * dz
 
         inside = (dx_b / p.a) ** 2 + (dy_b / p.a) ** 2 + (dz_b / p.c) ** 2 <= 1.0
-        volume[inside] = PHASE_CARBON
+        lx_w = lx % nx
+        ly_w = ly % ny
 
-    return volume
+        ixg = lx_w[:, None, None] * np.ones((1, len(ly), len(lz)), dtype=np.intp)
+        iyg = ly_w[None, :, None] * np.ones((len(lx), 1, len(lz)), dtype=np.intp)
+        izg = lz[None, None, :] * np.ones((len(lx), len(ly), 1), dtype=np.intp)
+        vol[ixg[inside], iyg[inside], izg[inside]] = PHASE_GRAPHITE
 
-
-carbon_label = voxelize_particles(packing.particles, domain, comp.compression_ratio)
-
-carbon_vf = (carbon_label == PHASE_CARBON).mean()
-actual_porosity = 1.0 - carbon_vf
-print(f"\nVoxelized carbon label:")
-print(
-    f"  Carbon voxels  : {(carbon_label == PHASE_CARBON).sum():,}  (φ_C = {carbon_vf:.3f})"
-)
-print(
-    f"  Pore   voxels  : {(carbon_label == PHASE_PORE).sum():,}  (φ_pore = {actual_porosity:.3f})"
-)
-
-np.savez_compressed(
-    OUT / "carbon_scaffold.npz",
-    label_map=carbon_label,
-    voxel_size_nm=np.float32(domain.voxel_size_nm),
-    compression_ratio=np.float32(comp.compression_ratio),
-    N_carbon=np.int32(packing.N_placed),
-)
-print(f"Saved → output/carbon_scaffold.npz")
-
-# =============================================================================
-# STEP 3 — Si Vf Map
-# =============================================================================
-si_result = map_si_distribution(comp, domain, sim, carbon_label, packing, rng)
-print(si_result.summary())
-
-np.savez_compressed(
-    OUT / "si_map_result.npz",
-    si_vf=si_result.si_vf,
-    coating_vf=si_result.coating_vf,
-    void_mask=si_result.void_mask.astype(np.uint8),
-    voxel_size_nm=np.float32(domain.voxel_size_nm),
-)
-print(f"Saved → output/si_map_result.npz")
-
-# =============================================================================
-# VISUALIZATION HELPERS
-# =============================================================================
-
-# Phase colors — BSE-SEM convention
-COLORS = {
-    PHASE_PORE: np.array([0.92, 0.92, 0.96]),  # light grey-blue — pore
-    PHASE_GRAPHITE: np.array([0.29, 0.29, 0.29]),  # dark grey — graphite BSE
-    PHASE_SI: np.array([0.69, 0.77, 0.87]),  # steel blue — Si bright in BSE
-    PHASE_COATING: np.array([0.18, 0.18, 0.18]),  # near-black — carbon coating
-}
-VOID_COLOR = np.array([1.00, 0.95, 0.60])
-L_um = domain.Lx_nm / 1000.0
-vs_um = domain.voxel_size_nm / 1000.0
+    return vol
 
 
-def base_rgb(label_slice: np.ndarray) -> np.ndarray:
-    """Label map slice → float32 RGB (H, W, 3)."""
-    H, W = label_slice.shape
-    img = np.zeros((H, W, 3), dtype=np.float32)
-    for pid, col in COLORS.items():
-        img[label_slice == pid] = col
-    return img
-
-
-def composite_rgb(
-    label_slice: np.ndarray,
-    si_vf_slice: np.ndarray,
-    void_slice: np.ndarray,
-) -> np.ndarray:
-    """Blend carbon base + Si vf overlay + void tint into BSE-style RGB."""
-    img = base_rgb(label_slice)
-    si_alpha = np.clip(si_vf_slice * 4.0, 0.0, 1.0)
-    img = img * (1 - si_alpha[..., None]) + COLORS[PHASE_SI] * si_alpha[..., None]
-    img[void_slice > 0] = img[void_slice > 0] * 0.7 + VOID_COLOR * 0.3
-    return np.clip(img, 0.0, 1.0)
-
-
-def save_3panel(
-    vol_fn,  # callable(ix|iy|iz, plane) → slice
-    title: str,
-    fname: str,
-    dark: bool = True,
-    legend_handles=None,
-) -> None:
-    """Save a 3-panel orthogonal slice figure."""
-    nx, ny, nz = carbon_label.shape
-    bg = "#1a1a1a" if dark else "white"
-    tc = "white" if dark else "black"
-    ac = "#aaaaaa" if dark else "#333333"
-
-    fig, axes = plt.subplots(1, 3, figsize=(17, 5.5), facecolor=bg)
-    fig.suptitle(title, color=tc, fontsize=11, fontweight="bold", y=1.01)
-
-    panels = [
-        (nz // 2, "xy", "XY (Z-mid)", "X (µm)", "Y (µm)"),
-        (ny // 2, "xz", "XZ (Y-mid)", "X (µm)", "Z (µm)"),
-        (nx // 2, "yz", "YZ (X-mid)", "Y (µm)", "Z (µm)"),
-    ]
-    for ax, (idx, plane, ptitle, xl, yl) in zip(axes, panels):
-        img = vol_fn(idx, plane)
-        ax.imshow(
-            img, origin="lower", extent=[0, L_um, 0, L_um], interpolation="nearest"
-        )
-        ax.set_title(ptitle, color=tc, fontsize=10)
-        ax.set_xlabel(xl, color=ac, fontsize=8)
-        ax.set_ylabel(yl, color=ac, fontsize=8)
-        ax.tick_params(colors="#888888", labelsize=7)
-        for sp in ax.spines.values():
-            sp.set_edgecolor("#444")
-        ax.set_facecolor(bg)
-
-    if legend_handles:
-        fig.legend(
-            handles=legend_handles,
-            loc="lower center",
-            ncol=len(legend_handles),
-            frameon=False,
-            fontsize=9,
-            labelcolor=tc,
-            bbox_to_anchor=(0.5, -0.07),
-        )
-    plt.tight_layout()
-    plt.savefig(
-        OUT / fname, dpi=180, bbox_inches="tight", facecolor=fig.get_facecolor()
-    )
-    plt.close()
-    print(f"Saved → output/{fname}")
-
-
-# =============================================================================
-# PLOT 1 — Carbon-only 3-panel slices
-# =============================================================================
-def carbon_slice(idx, plane):
-    if plane == "xy":
-        return base_rgb(carbon_label[:, :, idx])
-    if plane == "xz":
-        return base_rgb(carbon_label[:, idx, :])
-    if plane == "yz":
-        return base_rgb(carbon_label[idx, :, :])
-
-
-save_3panel(
-    vol_fn=carbon_slice,
-    title=f"Carbon Scaffold  |  N={packing.N_placed} particles"
-    f"  |  φ_C={carbon_vf:.3f}  |  seed={sim.seed}",
-    fname="slice_carbon_3panel.png",
-    legend_handles=[
-        mpatches.Patch(color=COLORS[PHASE_GRAPHITE], label="Graphite"),
-        mpatches.Patch(color=COLORS[PHASE_PORE], label="Pore"),
-    ],
-)
-
-
-# =============================================================================
-# PLOT 2 — Si + Carbon composite 3-panel slices
-# =============================================================================
-def si_slice(idx, plane):
-    if plane == "xy":
-        return composite_rgb(
-            carbon_label[:, :, idx],
-            si_result.si_vf[:, :, idx],
-            si_result.void_mask[:, :, idx],
-        )
-    if plane == "xz":
-        return composite_rgb(
-            carbon_label[:, idx, :],
-            si_result.si_vf[:, idx, :],
-            si_result.void_mask[:, idx, :],
-        )
-    if plane == "yz":
-        return composite_rgb(
-            carbon_label[idx, :, :],
-            si_result.si_vf[idx, :, :],
-            si_result.void_mask[idx, :, :],
-        )
-
-
-save_3panel(
-    vol_fn=si_slice,
-    title=f"Si-C Microstructure  |  dist={sim.silicon.distribution}"
-    f"  |  wf_Si={comp.wf_si*100:.1f}%  |  err={si_result.mass_error_pct:.3f}%",
-    fname="slice_si_3panel.png",
-    legend_handles=[
-        mpatches.Patch(color=COLORS[PHASE_GRAPHITE], label="Graphite"),
-        mpatches.Patch(color=COLORS[PHASE_SI], label="Si (vf intensity)"),
-        mpatches.Patch(color=COLORS[PHASE_PORE], label="Pore"),
-        mpatches.Patch(color=VOID_COLOR, label="Void buffer"),
-    ],
-)
-
-# =============================================================================
-# PLOT 3 — Si vf histogram
-# =============================================================================
-nonzero = si_result.si_vf[si_result.si_vf > 0.001].ravel()
-fig, ax = plt.subplots(figsize=(8, 4), facecolor="#1a1a1a")
-ax.set_facecolor("#1a1a1a")
-ax.hist(nonzero, bins=60, color="#6699cc", edgecolor="none", alpha=0.85)
-ax.axvline(
-    nonzero.mean(), color="#ffcc44", lw=1.5, label=f"mean = {nonzero.mean():.4f}"
-)
-ax.axvline(
-    float(np.median(nonzero)),
-    color="#ff8844",
-    lw=1.2,
-    linestyle="--",
-    label=f"median = {float(np.median(nonzero)):.4f}",
-)
-ax.set_xlabel("Si volume fraction", color="white", fontsize=10)
-ax.set_ylabel("Voxel count", color="white", fontsize=10)
-ax.set_title("Si vf Distribution (non-zero voxels)", color="white", fontsize=11)
-ax.tick_params(colors="#888888")
-ax.legend(frameon=False, labelcolor="white", fontsize=9)
-for sp in ax.spines.values():
-    sp.set_edgecolor("#333")
-plt.tight_layout()
-plt.savefig(
-    OUT / "si_vf_histogram.png",
-    dpi=160,
-    bbox_inches="tight",
-    facecolor=fig.get_facecolor(),
-)
-plt.close()
-print("Saved → output/si_vf_histogram.png")
-
-
-# =============================================================================
-# HELPER — Ellipsoid surface mesh (for Plotly)
-# =============================================================================
-def ellipsoid_surface(
+def _ellipsoid_surface(
     p: OblateSpheroid,
-    compression_ratio: float,
-    n_pts: int = 18,
+    cr: float,
+    n_pts: int = 16,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Parametric ellipsoid surface in µm, Z compressed to final domain."""
+    """Parametric ellipsoid surface in µm (post-calendering)."""
     u = np.linspace(0, 2 * np.pi, n_pts)
     v = np.linspace(0, np.pi, n_pts)
     xs = p.a * np.outer(np.cos(u), np.sin(v))
     ys = p.a * np.outer(np.sin(u), np.sin(v))
     zs = p.c * np.outer(np.ones_like(u), np.cos(v))
 
-    pts_body = np.stack([xs.ravel(), ys.ravel(), zs.ravel()], axis=0)
-    pts_lab = p.R @ pts_body
-
-    shape = xs.shape
-    xl = (pts_lab[0] + p.center[0]).reshape(shape) / 1000.0
-    yl = (pts_lab[1] + p.center[1]).reshape(shape) / 1000.0
-    zl = (pts_lab[2] * compression_ratio + p.center[2] * compression_ratio).reshape(
-        shape
-    ) / 1000.0
+    pts = p.R @ np.stack([xs.ravel(), ys.ravel(), zs.ravel()])
+    sh = xs.shape
+    xl = (pts[0] + p.center[0]).reshape(sh) / 1000.0
+    yl = (pts[1] + p.center[1]).reshape(sh) / 1000.0
+    zl = (pts[2] * cr + p.center[2] * cr).reshape(sh) / 1000.0
     return xl, yl, zl
 
 
-def _base_3d_layout(title: str) -> go.Layout:
-    Lz_um = domain.Lz_final_nm / 1000.0
-    return go.Layout(
-        title=dict(text=title, font=dict(color="white"), x=0.5),
-        paper_bgcolor="#1a1a1a",
-        scene=dict(
-            bgcolor="#1a1a1a",
-            xaxis=dict(
-                title="X (µm)",
-                range=[0, L_um],
-                backgroundcolor="#1a1a1a",
-                gridcolor="#333",
-                showbackground=True,
-                color="white",
-            ),
-            yaxis=dict(
-                title="Y (µm)",
-                range=[0, L_um],
-                backgroundcolor="#1a1a1a",
-                gridcolor="#333",
-                showbackground=True,
-                color="white",
-            ),
-            zaxis=dict(
-                title="Z (µm)",
-                range=[0, Lz_um],
-                backgroundcolor="#1a1a1a",
-                gridcolor="#333",
-                showbackground=True,
-                color="white",
-            ),
-            aspectmode="cube",
-            camera=dict(eye=dict(x=1.5, y=1.5, z=1.0)),
-        ),
-        margin=dict(l=0, r=0, t=40, b=0),
-        showlegend=True,
+def _discrete_colorscale(
+    phase_colors_hex: dict[int, str],
+) -> tuple[list, list]:
+    """
+    Build a Plotly discrete colorscale for the 7 phase IDs.
+
+    Returns (colorscale, tickvals, ticktext) for use with go.Surface surfacecolor.
+    surfacecolor values should be phase_id / (n_phases - 1).
+    """
+    n = len(PHASE_NAMES)  # 7
+    cs = []
+    for i in range(n):
+        col = phase_colors_hex.get(i, "#888888")
+        lo = i / n
+        hi = (i + 1) / n
+        if i == 0:
+            lo = 0.0
+        if i == n - 1:
+            hi = 1.0
+        cs.append([lo, col])
+        cs.append([hi - 1e-9 if i < n - 1 else 1.0, col])
+
+    tickvals = [i / (n - 1) for i in range(n)]
+    ticktext = [PHASE_NAMES[i] for i in range(n)]
+    return cs, tickvals, ticktext
+
+
+# =============================================================================
+# LOAD + RESOLVE
+# =============================================================================
+print("Loading config and materials DB...")
+cfg = load_run_config("str_gen_config.yml")
+db = load_materials_db("materials_db.yml")
+sim = resolve(cfg, db)
+
+# =============================================================================
+# STEPS 0–1
+# =============================================================================
+comp = compute_composition(sim)
+domain = build_domain(comp)
+print(comp.summary())
+print(domain.summary())
+comp.raise_if_critical()
+
+# =============================================================================
+# STEPS 2–7  (with percolation retry loop)
+# =============================================================================
+MAX_RETRIES = 10
+grid = None
+
+for attempt in range(MAX_RETRIES):
+    seed = sim.seed + attempt
+    rng = np.random.default_rng(seed)
+
+    t0 = time.perf_counter()
+    print(f"\n[Attempt {attempt+1}/{MAX_RETRIES}]  seed={seed}")
+
+    # Step 2 — Carbon scaffold
+    print("  Step 2: Carbon packing...")
+    packing = pack_carbon_scaffold(comp, domain, sim, rng)
+    print(
+        f"    {packing.N_placed}/{packing.N_target} particles  "
+        f"φ={packing.phi_achieved:.3f}  inflated={packing.inflated}"
     )
 
+    # Intermediate carbon label for Steps 3-6
+    carbon_label = _voxelize_carbon_only(
+        packing.particles, domain, comp.compression_ratio
+    )
 
-def _carbon_traces() -> list:
-    Lg = db.graphite_artificial.vis_color_rgb
-    c_col = f"rgb({Lg[0]},{Lg[1]},{Lg[2]})"
-    traces = []
-    for i, p in enumerate(packing.particles):
-        xl, yl, zl = ellipsoid_surface(p, comp.compression_ratio)
-        traces.append(
-            go.Surface(
-                x=xl,
-                y=yl,
-                z=zl,
-                colorscale=[[0, c_col], [1, c_col]],
-                showscale=False,
-                opacity=0.65,
-                name="Graphite" if i == 0 else None,
-                showlegend=i == 0,
-                lighting=dict(ambient=0.55, diffuse=0.75, specular=0.2),
-                hoverinfo="skip",
-            )
+    # Step 3 — Si vf map
+    print("  Step 3: Si distribution...")
+    si_result = map_si_distribution(comp, domain, sim, carbon_label, packing, rng)
+    print(f"    err={si_result.mass_error_pct:.3f}%  dist={si_result.distribution}")
+
+    # Step 4 — CBD + Binder
+    print("  Step 4: CBD + Binder fill...")
+    cbd_result = fill_cbd_binder(comp, domain, sim, carbon_label, si_result, rng)
+    print(
+        f"    CBD err={cbd_result.cbd_mass_error_pct:.3f}%  "
+        f"percolates={cbd_result.cbd_percolating}"
+    )
+
+    # Step 5 — Calendering
+    print("  Step 5: Calendering transform...")
+    si_result, cbd_result = apply_calendering(
+        packing.particles, comp, domain, si_result, cbd_result, sim
+    )
+
+    # Step 6 — SEI shell
+    print("  Step 6: SEI shell...")
+    sei_result = add_sei_shell(comp, domain, sim, carbon_label, si_result, rng)
+    print(
+        f"    t_eff={sei_result.mean_thickness_nm:.2f}nm  "
+        f"SA={sei_result.surface_area_nm2:.3e} nm²"
+    )
+
+    # Step 7 — Percolation validation
+    print("  Step 7: Percolation check...")
+    try:
+        perc = validate_percolation(
+            comp,
+            domain,
+            sim,
+            carbon_label,
+            si_result,
+            cbd_result,
+            sei_result,
         )
-    return traces
+        print(
+            f"    electronic={perc.electronic_fraction:.4f}  "
+            f"ionic={perc.ionic_fraction:.4f}  ✓"
+        )
 
+        # Step 8 — Final voxelization
+        print("  Step 8: Voxelizing...")
+        grid = voxelize_microstructure(
+            comp,
+            domain,
+            sim,
+            packing.particles,
+            si_result,
+            cbd_result,
+            sei_result,
+        )
+        print(f"    Done in {time.perf_counter()-t0:.1f}s  seed={seed}")
+        print(grid.summary())
+        break
+
+    except PercolationFailed as e:
+        print(
+            f"    ✗ Percolation failed ({e.fraction:.4f} < {e.threshold:.4f}) "
+            f"— retrying..."
+        )
+        continue
+
+if grid is None:
+    sys.exit(
+        f"Failed to generate a percolating structure after {MAX_RETRIES} attempts."
+    )
 
 # =============================================================================
-# PLOT 4 — 3D: carbon ellipsoids only
+# SAVE .NPZ
 # =============================================================================
-fig_c = go.Figure(
-    data=_carbon_traces(),
-    layout=_base_3d_layout(
-        f"Carbon Scaffold 3D  |  N={packing.N_placed}  |  seed={sim.seed}"
-    ),
-)
-fig_c.write_html(str(OUT / "particles_3d.html"))
-print("Saved → output/particles_3d.html")
+grid.save(str(OUT / "microstructure.npz"))
+print(f"\nSaved → output/microstructure.npz")
 
 # =============================================================================
-# PLOT 5 — 3D: carbon + Si isosurface
+# PLOTLY 3D VIEWER
 # =============================================================================
-traces_si = _carbon_traces()
+print("\nBuilding interactive viewer...")
 
-si_smooth = si_result.si_vf
-threshold = max(0.05, float(np.percentile(si_smooth[si_smooth > 0.001], 25)))
+vs_um = domain.voxel_size_nm / 1000.0
+L_um = domain.Lx_nm / 1000.0
+Lz_um = domain.Lz_final_nm / 1000.0
+cr = comp.compression_ratio
+n_ph = len(PHASE_NAMES)  # 7
+L_nm = domain.Lx_nm
 
-try:
-    verts, faces, _, _ = marching_cubes(si_smooth, level=threshold)
-    vx = verts[:, 0] * vs_um
-    vy = verts[:, 1] * vs_um
-    vz = verts[:, 2] * vs_um
-    Ls = db.si_base.vis_color_rgb
-    traces_si.append(
-        go.Mesh3d(
-            x=vx,
-            y=vy,
-            z=vz,
-            i=faces[:, 0],
-            j=faces[:, 1],
-            k=faces[:, 2],
-            color=f"rgb({Ls[0]},{Ls[1]},{Ls[2]})",
-            opacity=0.40,
-            name=f"Si vf  (iso={threshold:.3f})",
-            showlegend=True,
+hex_col = grid.phase_colors_hex  # from materials_db
+cscale, tickvals, ticktext = _discrete_colorscale(hex_col)
+
+traces: list[go.BaseTraceType] = []
+
+# ── Carbon ellipsoids ─────────────────────────────────────────────────────
+c_col = hex_col[PHASE_GRAPHITE]
+for i, p in enumerate(packing.particles):
+    xl, yl, zl = _ellipsoid_surface(p, cr)
+    traces.append(
+        go.Surface(
+            x=xl,
+            y=yl,
+            z=zl,
+            colorscale=[[0, c_col], [1, c_col]],
+            showscale=False,
+            opacity=0.70,
+            name="Graphite",
+            legendgroup="Graphite",
+            showlegend=(i == 0),
+            lighting=dict(
+                ambient=0.55, diffuse=0.80, specular=0.15, roughness=0.5, fresnel=0.1
+            ),
             hoverinfo="skip",
         )
     )
-except Exception as e:
-    print(f"  ⚠ Si isosurface skipped: {e}")
 
-fig_si = go.Figure(
-    data=traces_si,
-    layout=_base_3d_layout(
-        f"Si-C Microstructure 3D  |  dist={sim.silicon.distribution}"
-        f"  |  wf_Si={comp.wf_si*100:.1f}%"
-    ),
+# ── Si isosurface (marching cubes) ────────────────────────────────────────
+si_arr = grid.si_vf.astype(np.float32)
+si_nonzero = si_arr[si_arr > 0.001]
+if si_nonzero.size > 0:
+    si_iso = float(np.percentile(si_nonzero, 20))
+    try:
+        verts, faces, _, _ = marching_cubes(si_arr, level=si_iso)
+        traces.append(
+            go.Mesh3d(
+                x=verts[:, 0] * vs_um,
+                y=verts[:, 1] * vs_um,
+                z=verts[:, 2] * vs_um,
+                i=faces[:, 0],
+                j=faces[:, 1],
+                k=faces[:, 2],
+                color=hex_col[PHASE_SI],
+                opacity=0.35,
+                name="Silicon",
+                legendgroup="Silicon",
+                showlegend=True,
+                hoverinfo="skip",
+            )
+        )
+    except Exception as e:
+        print(f"  ⚠ Si isosurface skipped: {e}")
+
+# ── CBD isosurface ────────────────────────────────────────────────────────
+cbd_arr = grid.cbd_vf.astype(np.float32)
+cbd_nonzero = cbd_arr[cbd_arr > 0.001]
+if cbd_nonzero.size > 0:
+    cbd_iso = float(np.percentile(cbd_nonzero, 35))
+    try:
+        verts_c, faces_c, _, _ = marching_cubes(cbd_arr, level=cbd_iso)
+        traces.append(
+            go.Mesh3d(
+                x=verts_c[:, 0] * vs_um,
+                y=verts_c[:, 1] * vs_um,
+                z=verts_c[:, 2] * vs_um,
+                i=faces_c[:, 0],
+                j=faces_c[:, 1],
+                k=faces_c[:, 2],
+                color=hex_col[PHASE_CBD],
+                opacity=0.25,
+                name="CBD",
+                legendgroup="CBD",
+                showlegend=True,
+                hoverinfo="skip",
+            )
+        )
+    except Exception as e:
+        print(f"  ⚠ CBD isosurface skipped: {e}")
+
+# ── Three orthogonal cross-section planes (discrete phase colormap) ───────
+#
+# surfacecolor = phase_id / (n_ph - 1) so values span [0, 1]
+# which maps to our discrete colorscale.
+#
+iz_mid = domain.nz // 2
+iy_mid = domain.ny // 2
+ix_mid = domain.nx // 2
+
+# XY plane (Z mid-slice)
+_xs = np.arange(domain.nx) * vs_um
+_ys = np.arange(domain.ny) * vs_um
+_Xs, _Ys = np.meshgrid(_xs, _ys, indexing="ij")
+_z_plane = np.full_like(_Xs, iz_mid * vs_um)
+_sc_xy = grid.label_map[:, :, iz_mid].astype(np.float32) / (n_ph - 1)
+
+traces.append(
+    go.Surface(
+        x=_Xs,
+        y=_Ys,
+        z=_z_plane,
+        surfacecolor=_sc_xy,
+        colorscale=cscale,
+        cmin=0.0,
+        cmax=1.0,
+        showscale=False,
+        opacity=1.0,
+        name="Slice XY",
+        legendgroup="Slices",
+        showlegend=True,
+        hoverinfo="skip",
+    )
 )
-fig_si.write_html(str(OUT / "particles_3d_with_si.html"))
-print("Saved → output/particles_3d_with_si.html")
 
-# =============================================================================
-# FINAL SUMMARY
-# =============================================================================
+# XZ plane (Y mid-slice)
+_xs2 = np.arange(domain.nx) * vs_um
+_zs2 = np.arange(domain.nz) * vs_um
+_Xs2, _Zs2 = np.meshgrid(_xs2, _zs2, indexing="ij")
+_y_plane = np.full_like(_Xs2, iy_mid * vs_um)
+_sc_xz = grid.label_map[:, iy_mid, :].astype(np.float32) / (n_ph - 1)
+
+traces.append(
+    go.Surface(
+        x=_Xs2,
+        y=_y_plane,
+        z=_Zs2,
+        surfacecolor=_sc_xz,
+        colorscale=cscale,
+        cmin=0.0,
+        cmax=1.0,
+        showscale=False,
+        opacity=1.0,
+        name="Slice XZ",
+        legendgroup="Slices",
+        showlegend=False,
+        hoverinfo="skip",
+    )
+)
+
+# YZ plane (X mid-slice)
+_ys3 = np.arange(domain.ny) * vs_um
+_zs3 = np.arange(domain.nz) * vs_um
+_Ys3, _Zs3 = np.meshgrid(_ys3, _zs3, indexing="ij")
+_x_plane = np.full_like(_Ys3, ix_mid * vs_um)
+_sc_yz = grid.label_map[ix_mid, :, :].astype(np.float32) / (n_ph - 1)
+
+traces.append(
+    go.Surface(
+        x=_x_plane,
+        y=_Ys3,
+        z=_Zs3,
+        surfacecolor=_sc_yz,
+        colorscale=cscale,
+        cmin=0.0,
+        cmax=1.0,
+        showscale=False,
+        opacity=1.0,
+        name="Slice YZ",
+        legendgroup="Slices",
+        showlegend=False,
+        hoverinfo="skip",
+    )
+)
+
+# ── Dummy scatter traces for clean legend entries ─────────────────────────
+#
+# Plotly Surface traces don't render a color swatch in the legend cleanly.
+# Adding zero-point Scatter3d gives proper colored squares in the legend.
+for phase_id, name in PHASE_NAMES.items():
+    if phase_id == PHASE_PORE:
+        continue
+    frac = grid.phase_fractions.get(name, 0.0)
+    traces.append(
+        go.Scatter3d(
+            x=[None],
+            y=[None],
+            z=[None],
+            mode="markers",
+            marker=dict(size=10, color=hex_col[phase_id], symbol="square"),
+            name=f"{name}  ({frac*100:.1f}%)",
+            legendgroup=name,
+            showlegend=True,
+        )
+    )
+
+# ── Phase color bar (visible colorscale on one dummy surface) ─────────────
+# Add a thin colorbar as annotation rather than a trace
+# Done via a 1D surface with showscale=True and the discrete colorscale
+_dummy_x = np.array([[0, 0], [0, 0]])
+_dummy_y = np.array([[0, 0], [0, 0]])
+_dummy_z = np.array([[0, 0], [0, 0]])
+_dummy_sc = np.array([[0.0, 1.0], [0.0, 1.0]])
+
+traces.append(
+    go.Surface(
+        x=_dummy_x,
+        y=_dummy_y,
+        z=_dummy_z,
+        surfacecolor=_dummy_sc,
+        colorscale=cscale,
+        cmin=0.0,
+        cmax=1.0,
+        showscale=True,
+        opacity=0.0,  # invisible — colorbar only
+        colorbar=dict(
+            title=dict(text="Phase", side="right"),
+            tickvals=tickvals,
+            ticktext=ticktext,
+            thickness=18,
+            len=0.7,
+            x=1.02,
+        ),
+        showlegend=False,
+        hoverinfo="skip",
+        name="_colorbar",
+    )
+)
+
+# ── Composition annotation text ───────────────────────────────────────────
+ann_lines = [
+    f"<b>Composition</b>",
+    f"Si:      {comp.wf_si*100:.1f} wt%  ({comp.vf_si*100:.1f} vol%)",
+    f"C-matrix:{comp.wf_carbon*100:.1f} wt%  ({comp.vf_carbon*100:.1f} vol%)",
+    f"CBD:     {comp.wf_additive*100:.1f} wt%",
+    f"Binder:  {comp.wf_binder*100:.1f} wt%",
+    f"Porosity:{comp.porosity*100:.0f}%  (target)",
+    f"",
+    f"<b>Domain:</b> {L_um:.0f}³ µm  |  {domain.nx}³ vx  |  {vs_um*1000:.0f}nm/vx",
+    f"<b>Particles:</b> {packing.N_placed} graphite flakes",
+    f"<b>Capacity:</b> {comp.capacity_total_mah:.2e} mAh  "
+    f"(Si: {comp.capacity_si_fraction*100:.0f}%)",
+]
+ann_text = "<br>".join(ann_lines)
+
+# ── Layout ────────────────────────────────────────────────────────────────
+layout = go.Layout(
+    title=dict(
+        text=(
+            f"Si-Graphite Microstructure  |  "
+            f"seed={seed}  |  "
+            f"{packing.N_placed} particles"
+        ),
+        font=dict(color="white", size=14),
+        x=0.5,
+    ),
+    paper_bgcolor="#111111",
+    scene=dict(
+        bgcolor="#111111",
+        xaxis=dict(
+            title="X (µm)",
+            range=[0, L_um],
+            backgroundcolor="#1a1a1a",
+            gridcolor="#2a2a2a",
+            showbackground=True,
+            color="#aaaaaa",
+        ),
+        yaxis=dict(
+            title="Y (µm)",
+            range=[0, L_um],
+            backgroundcolor="#1a1a1a",
+            gridcolor="#2a2a2a",
+            showbackground=True,
+            color="#aaaaaa",
+        ),
+        zaxis=dict(
+            title="Z (µm)",
+            range=[0, Lz_um],
+            backgroundcolor="#1a1a1a",
+            gridcolor="#2a2a2a",
+            showbackground=True,
+            color="#aaaaaa",
+        ),
+        aspectmode="cube",
+        camera=dict(eye=dict(x=1.6, y=1.6, z=1.0)),
+    ),
+    legend=dict(
+        x=0.01,
+        y=0.98,
+        bgcolor="rgba(20,20,20,0.85)",
+        bordercolor="#333",
+        borderwidth=1,
+        font=dict(color="white", size=11),
+    ),
+    annotations=[
+        dict(
+            text=ann_text,
+            align="left",
+            showarrow=False,
+            xref="paper",
+            yref="paper",
+            x=1.18,
+            y=0.30,
+            bgcolor="rgba(20,20,20,0.80)",
+            bordercolor="#444",
+            borderwidth=1,
+            font=dict(color="#dddddd", size=10, family="monospace"),
+        )
+    ],
+    margin=dict(l=0, r=220, t=50, b=0),
+    # Toggle buttons for layer visibility
+    updatemenus=[
+        dict(
+            type="buttons",
+            direction="left",
+            x=0.01,
+            y=1.07,
+            xanchor="left",
+            bgcolor="#222222",
+            bordercolor="#444",
+            font=dict(color="white", size=10),
+            buttons=[
+                dict(
+                    label="All On",
+                    method="restyle",
+                    args=["visible", True],
+                ),
+                dict(
+                    label="Particles Only",
+                    method="restyle",
+                    args=[
+                        "visible",
+                        [
+                            True if "Graphite" in (t.name or "") else "legendonly"
+                            for t in traces
+                        ],
+                    ],
+                ),
+                dict(
+                    label="Slices Only",
+                    method="restyle",
+                    args=[
+                        "visible",
+                        [
+                            (
+                                True
+                                if "Slice" in (t.name or "") or t.name == "_colorbar"
+                                else "legendonly"
+                            )
+                            for t in traces
+                        ],
+                    ],
+                ),
+            ],
+        ),
+    ],
+)
+
+fig = go.Figure(data=traces, layout=layout)
+
+# Save as self-contained HTML (no CDN dependency)
+fig.write_html(
+    str(OUT / "microstructure_viewer.html"),
+    full_html=True,
+    include_plotlyjs=True,  # embed Plotly JS — fully offline
+    config={
+        "displayModeBar": True,
+        "modeBarButtonsToAdd": ["toggleSpikelines"],
+        "toImageButtonOptions": {
+            "format": "svg",
+            "filename": f"microstructure_seed{seed}",
+        },
+    },
+)
+
+print(f"Saved → output/microstructure_viewer.html")
 print("\n" + "=" * 62)
-print("  ALL STEPS COMPLETE")
-print("=" * 62)
-print(f"  output/carbon_scaffold.npz")
-print(f"  output/si_map_result.npz")
-print(f"  output/slice_carbon_3panel.png")
-print(f"  output/slice_si_3panel.png")
-print(f"  output/si_vf_histogram.png")
-print(f"  output/particles_3d.html")
-print(f"  output/particles_3d_with_si.html")
+print(f"  DONE  |  seed={seed}  |  {time.perf_counter()-t0:.1f}s total")
+print(f"  output/microstructure.npz")
+print(f"  output/microstructure_viewer.html")
 print("=" * 62)

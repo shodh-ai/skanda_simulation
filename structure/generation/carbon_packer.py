@@ -37,13 +37,7 @@ from structure.schema.resolved import ResolvedSimulation
 
 from .composition import CompositionState
 from .domain import DomainGeometry
-
-
-# ---------------------------------------------------------------------------
-# Phase ID
-# ---------------------------------------------------------------------------
-
-PHASE_CARBON: int = 1
+from ..phases import PHASE_GRAPHITE
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +58,7 @@ class OblateSpheroid:
                   in the lab frame. The c-axis is R[:, 2].
         A_inv   : cached inverse shape matrix = inv(R @ diag(a⁻²,a⁻²,c⁻²) @ R.T)
                   pre-computed once to avoid repeated inversion during overlap checks
-        phase_id: always PHASE_CARBON = 1
+        phase_id: always PHASE_GRAPHITE = 1
     """
 
     center: np.ndarray
@@ -72,7 +66,7 @@ class OblateSpheroid:
     c: float
     R: np.ndarray
     A_inv: np.ndarray = field(repr=False)
-    phase_id: int = PHASE_CARBON
+    phase_id: int = PHASE_GRAPHITE
 
     @property
     def volume_nm3(self) -> float:

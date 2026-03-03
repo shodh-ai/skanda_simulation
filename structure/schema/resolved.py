@@ -42,6 +42,8 @@ class ResolvedSilicon:
     volume_expansion_factor: float
     theoretical_capacity_mAh_g: float
     molar_mass_g_mol: float
+    vis_color_rgb: tuple[float, float, float]
+    vis_color_hex: str
 
 
 @dataclass
@@ -50,6 +52,8 @@ class ResolvedCarbon:
     d50_nm: float
     size_cv: float
     orientation_degree: float
+    vis_color_rgb: tuple[float, float, float]
+    vis_color_hex: str
 
 
 @dataclass
@@ -140,6 +144,8 @@ def resolve(cfg: RunConfig, db: MaterialsDB) -> ResolvedSimulation:
         volume_expansion_factor=si_db.volume_expansion_factor,
         theoretical_capacity_mAh_g=si_db.theoretical_capacity_mAh_g,
         molar_mass_g_mol=si_db.molar_mass_g_mol,
+        vis_color_rgb=si_db.vis_color_rgb,
+        vis_color_hex=si_db.vis_color_hex,
     )
 
     carbon = ResolvedCarbon(
@@ -147,6 +153,8 @@ def resolve(cfg: RunConfig, db: MaterialsDB) -> ResolvedSimulation:
         d50_nm=cfg.carbon_particle_d50_nm,
         size_cv=cfg.carbon_particle_size_cv,
         orientation_degree=cfg.carbon_orientation_degree,
+        vis_color_rgb=db.get_graphite(cfg.carbon_type.value).vis_color_rgb,
+        vis_color_hex=db.get_graphite(cfg.carbon_type.value).vis_color_hex,
     )
 
     composition = ResolvedComposition(
