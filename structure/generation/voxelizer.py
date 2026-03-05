@@ -45,8 +45,8 @@ from ..phases import (
 # vf thresholds for converting continuous → discrete label
 _THRESHOLDS: dict[int, float] = {
     PHASE_SI: 0.02,
-    PHASE_CBD: 0.005,
-    PHASE_BINDER: 0.001,
+    PHASE_CBD: 0.10,
+    PHASE_BINDER: 0.15,
     PHASE_SEI: 0.005,
 }
 
@@ -113,40 +113,82 @@ class VoxelGrid:
 
     def summary(self) -> str:
         nx, ny, nz = self.shape
+        N = self.label_map.size
+
+        # ── Memory (fix: binder_vf was missing) ───────────────────────────
         mb = (
             self.label_map.nbytes
             + self.si_vf.nbytes
             + self.cbd_vf.nbytes
+            + self.binder_vf.nbytes          # was missing before
             + self.sei_vf.nbytes
         ) / 1e6
+
+        # ── Actual VF: sum float16 arrays directly ─────────────────────────
+        # Cast to float32 first to avoid float16 accumulation error on large grids.
+        actual_fracs: dict[str, float] = {}
+        for pid in sorted(PHASE_NAMES.keys()):
+            name = PHASE_NAMES[pid]
+            if pid == PHASE_SI:
+                actual_fracs[name] = float(self.si_vf.astype(np.float32).sum()) / N
+            elif pid == PHASE_CBD:
+                actual_fracs[name] = float(self.cbd_vf.astype(np.float32).sum()) / N
+            elif pid == PHASE_BINDER:
+                actual_fracs[name] = float(self.binder_vf.astype(np.float32).sum()) / N
+            elif pid == PHASE_SEI:
+                actual_fracs[name] = float(self.sei_vf.astype(np.float32).sum()) / N
+            else:
+                # Graphite and Pore have no continuous VF field — use label count
+                actual_fracs[name] = float((self.label_map == pid).sum()) / N
+
+        # ── Label VF: count uint8 label_map entries ────────────────────────
+        label_fracs: dict[str, float] = {
+            PHASE_NAMES[pid]: float((self.label_map == pid).sum()) / N
+            for pid in sorted(PHASE_NAMES.keys())
+        }
+
+        # ── Format ─────────────────────────────────────────────────────────
+        col_w = 70
         lines = [
-            "=" * 62,
+            "=" * col_w,
             "  VOXEL GRID",
-            "=" * 62,
-            f"  Shape         : {nx}×{ny}×{nz} = {self.label_map.size:,} voxels",
+            "=" * col_w,
+            f"  Shape         : {nx}×{ny}×{nz} = {N:,} voxels",
             f"  Voxel size    : {self.voxel_size_nm:.2f} nm",
             f"  Memory        : {mb:.1f} MB",
             "",
-            "  Phase volume fractions:",
+            "  Phase volume fractions",
+            f"  {'Phase':<12}  {'Actual VF':>10}  {'Label VF':>10}  Color     Bar (Actual)",
+            f"  {'-'*12}  {'-'*10}  {'-'*10}  --------  -----------",
         ]
-        for name, frac in self.phase_fractions.items():
-            phase_id = next((pid for pid, n in PHASE_NAMES.items() if n == name), None)
-            r, g, b = (
-                self.phase_colors.get(phase_id, (0.5, 0.5, 0.5))
-                if phase_id is not None
-                else (0.5, 0.5, 0.5)
+
+        for pid in sorted(PHASE_NAMES.keys()):
+            name   = PHASE_NAMES[pid]
+            af     = actual_fracs.get(name, 0.0)
+            lf     = label_fracs.get(name, 0.0)
+            hx     = self.phase_colors_hex.get(pid, "#888888")
+            bar    = "█" * int(af * 30)
+            # Mark divergence between actual and label VF with a flag
+            diff   = abs(af - lf)
+            flag   = "  ◄ Δ{:.3f}".format(diff) if diff > 0.01 else ""
+            lines.append(
+                f"  {name:<12}  {af:>10.4f}  {lf:>10.4f}  {hx}  {bar}{flag}"
             )
-            hex_col = (
-                self.phase_colors_hex.get(phase_id, "#888888")
-                if phase_id is not None
-                else "#888888"
-            )
-            bar = "█" * int(frac * 38)
-            lines.append(f"    {name:<12}: {frac:.4f}  {hex_col}  {bar}")
+
+        lines += [
+            "",
+            "  Notes:",
+            "  • Actual VF  — summed from float16 sub-voxel fields (pre-threshold truth).",
+            "  • Label VF   — counted from uint8 label_map  (what solvers/renderers see).",
+            "  • ◄ Δ flag   — phases where Actual vs Label diverges by > 1 pp.",
+            "  • Graphite / Pore have no float field; both columns use label_map counts.",
+        ]
+
         if self.warnings:
             lines += ["", f"  ⚠  {len(self.warnings)} WARNING(s):"]
             lines += [f"     [{i+1}] {w}" for i, w in enumerate(self.warnings)]
-        lines.append("=" * 62)
+
+        lines.append("=" * col_w)
         return "\n".join(lines)
 
     def save(self, path: str) -> None:
@@ -412,7 +454,11 @@ class Voxelizer:
         # ------------------------------------------------------------------
         # Phase fractions + sanity warnings
         # ------------------------------------------------------------------
-        phase_fractions = _compute_phase_fractions(label_map)
+        phase_fractions = _compute_phase_fractions(
+            label_map,
+            cbd_vf=cbd_result.cbd_vf,
+            binder_vf=cbd_result.binder_vf,
+        )
 
         c_frac = phase_fractions.get("Graphite", 0.0)
         expected_c = comp.vf_carbon * (1.0 - comp.porosity)
@@ -443,12 +489,30 @@ class Voxelizer:
 # ---------------------------------------------------------------------------
 
 
-def _compute_phase_fractions(label_map: np.ndarray) -> dict[str, float]:
+def _compute_phase_fractions(
+    label_map: np.ndarray,
+    *,
+    cbd_vf: np.ndarray | None = None,
+    binder_vf: np.ndarray | None = None,
+) -> dict[str, float]:
+    """Compute per-phase volume fractions.
+
+    For CBD and Binder the *float* VF arrays are summed so that the
+    reported fractions reflect the true continuous values even when
+    the label-map thresholds are set high enough to hide them from
+    the 3D viewer.
+    """
     N = label_map.size
-    return {
-        PHASE_NAMES[pid]: float((label_map == pid).sum()) / N
-        for pid in sorted(PHASE_NAMES.keys())
-    }
+    fracs: dict[str, float] = {}
+    for pid in sorted(PHASE_NAMES.keys()):
+        name = PHASE_NAMES[pid]
+        if pid == PHASE_CBD and cbd_vf is not None:
+            fracs[name] = float(cbd_vf.sum()) / N
+        elif pid == PHASE_BINDER and binder_vf is not None:
+            fracs[name] = float(binder_vf.sum()) / N
+        else:
+            fracs[name] = float((label_map == pid).sum()) / N
+    return fracs
 
 
 # ---------------------------------------------------------------------------
