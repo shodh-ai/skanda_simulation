@@ -45,8 +45,8 @@ from ..phases import (
 # vf thresholds for converting continuous → discrete label
 _THRESHOLDS: dict[int, float] = {
     PHASE_SI: 0.02,
-    PHASE_CBD: 0.02,
-    PHASE_BINDER: 0.02,
+    PHASE_CBD: 0.005,
+    PHASE_BINDER: 0.001,
     PHASE_SEI: 0.005,
 }
 
@@ -369,6 +369,39 @@ class Voxelizer:
         sei_mask = (sei_result.sei_vf > thr_sei) & solid & (priority_map < pri_sei)
         label_map[sei_mask] = PHASE_SEI
         priority_map[sei_mask] = pri_sei
+
+        # ------------------------------------------------------------------
+        # Pass 4 — Pore Dominance
+        #
+        # Sub-voxel phases (Si, CBD, Binder, SEI) represent partial
+        # occupancy: a voxel labeled "Silicon" may only be 15% Si and
+        # 85% void.  If the discrete label map says "3 = Silicon",
+        # downstream solvers (TauFactor, PyBaMM) will treat it as a
+        # solid block, closing off the pore network.
+        #
+        # Rule: for non-carbon voxels, if the total sub-voxel solid
+        # fraction is < 50%, the voxel MUST stay Pore.  Carbon
+        # (Graphite) voxels are analytically rasterized — they are
+        # definitively inside a particle body and always 100% solid.
+        # ------------------------------------------------------------------
+        _PORE_DOMINANCE_THRESHOLD = 0.50
+
+        total_solid_vf = (
+            si_result.si_vf
+            + cbd_result.cbd_vf
+            + cbd_result.binder_vf
+            + sei_result.sei_vf
+        )
+
+        # Only reset voxels that were filled by sub-voxel fields, not
+        # by the carbon rasterizer (Graphite voxels are fully solid).
+        pore_dominant = (
+            (total_solid_vf < _PORE_DOMINANCE_THRESHOLD)
+            & (label_map != PHASE_GRAPHITE)
+            & (label_map != PHASE_PORE)     # already pore — skip
+        )
+        label_map[pore_dominant] = PHASE_PORE
+        priority_map[pore_dominant] = LABEL_PRIORITY[PHASE_PORE]
 
         # ------------------------------------------------------------------
         # Colors from materials_db

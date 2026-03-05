@@ -232,7 +232,7 @@ class CarbonScaffoldPacker:
                         f"{rejects} rejects — triggering inflation escape."
                     )
                     inflation_factor = self._inflate_to_target(
-                        target_phi=comp.phi_solid_pre,
+                        target_phi=comp.phi_carbon_pre,
                         domain=domain,
                     )
                     inflated = True
@@ -246,9 +246,9 @@ class CarbonScaffoldPacker:
         phi_achieved = self._current_phi(domain)
 
         # If we still missed target volume without inflation, inflate now
-        if not inflated and abs(phi_achieved - comp.phi_solid_pre) > 0.01:
+        if not inflated and abs(phi_achieved - comp.phi_carbon_pre) > 0.01:
             inflation_factor = self._inflate_to_target(
-                target_phi=comp.phi_solid_pre,
+                target_phi=comp.phi_carbon_pre,
                 domain=domain,
             )
             inflated = True
@@ -263,7 +263,7 @@ class CarbonScaffoldPacker:
             N_placed=N_placed,
             N_target=N,
             phi_achieved=phi_achieved,
-            phi_target=comp.phi_solid_pre,
+            phi_target=comp.phi_carbon_pre,
             inflated=inflated,
             inflation_factor=inflation_factor,
             total_attempts=total_attempts,
@@ -359,7 +359,9 @@ class CarbonScaffoldPacker:
         # Single-shot analytical scale factor on a only
         # V_new = f² × a² × c × (4π/3)  →  f = sqrt(V_target / V_current)
         f = math.sqrt(V_target / V_current)
-        f = min(f, 1.0 + self.MAX_INFLATION_STEPS * self.INFLATION_STEP_SIZE)
+        # Safety cap: allow up to 2× basal axis growth (4× volume) to cover
+        # any realistic RSA-to-target gap while preventing runaway.
+        f = min(f, 2.0)
 
         for p in self._particles:
             p.a = p.a * f

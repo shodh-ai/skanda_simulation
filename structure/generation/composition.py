@@ -148,6 +148,7 @@ class CompositionState:
     compression_ratio: float
     L_z_pre_nm: float  # expanded Z domain before calendering
     phi_solid_pre: float  # solid vol fraction before calendering
+    phi_carbon_pre: float  # carbon-only vol fraction in pre-calender box (RSA target)
 
     # ── Validation warnings (populated by _validate) ───────────────────────
     # Default must be last since it has a default value.
@@ -378,6 +379,7 @@ def compute_composition(sim: ResolvedSimulation) -> CompositionState:
     cr = sim.calendering_compression_ratio
     L_z_pre = L_nm / cr
     phi_pre = V_solid / (L_nm**2 * L_z_pre)  # = (1 - porosity) × cr
+    phi_carbon_pre = phi_pre * vf_carbon_val  # carbon's share of pre-calender solid
 
     # ── 10. Validation ───────────────────────────────────────────────────────
     warns = _validate(
@@ -435,6 +437,7 @@ def compute_composition(sim: ResolvedSimulation) -> CompositionState:
         compression_ratio=cr,
         L_z_pre_nm=L_z_pre,
         phi_solid_pre=phi_pre,
+        phi_carbon_pre=phi_carbon_pre,
         validation_warnings=warns,
     )
 
