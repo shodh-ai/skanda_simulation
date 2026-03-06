@@ -102,6 +102,15 @@ si_distribution:
   #   "surface_anchored"→ Si on outer C-matrix surface
   #   "core_shell"      → C-matrix shell over Si core
 
+si_embedding_uniformity_cv:
+  0.10 # Spatial variation of Si loading within a graphite particle
+  # Only active when si_distribution == "embedded"
+  # Range: 0.00 – 0.60
+  # 0.00 = perfectly uniform mixing
+  # Low (0.05 – 0.15): well-mixed, minor variation
+  # Mid (0.15 – 0.30): moderately patchy
+  # High (0.30 – 0.60): highly clustered intra-particle
+
 si_void_enabled: true # Hollow buffer zone around Si for volume expansion
 si_void_fraction:
   0.30 # Buffer void vol / Si particle vol
@@ -137,6 +146,9 @@ carbon_type: "graphite_artificial" # Options: graphite_artificial | graphite_nat
 carbon_orientation_degree:
   0.60 # 0.0 = random | 1.0 = perfectly aligned to Z
   # Range: 0.0 – 1.0
+  # ⚠ od=1.0 clamps the vMF concentration κ to 1000 (effectively perfect
+  #   alignment). Values above 0.95 are physically indistinguishable from 1.0
+  #   and will produce a UserWarning.
 
 # =============================================================================
 # CONDUCTIVE ADDITIVE

@@ -521,9 +521,14 @@ def _od_to_kappa(orientation_degree: float) -> float:
     Map orientation_degree ∈ [0, 1] to vMF concentration κ ≥ 0.
 
     Mapping: κ = -10 × ln(1 - orientation_degree)
-      od=0.0  → κ=0     (isotropic)
-      od=0.6  → κ≈9.2   (strong Z preference)
-      od=1.0  → κ=∞     (clamped to 1000)
+    od=0.0  → κ=0     (isotropic — uniform sphere)
+    od=0.60 → κ≈9.2   (strong Z preference)
+    od=0.95 → κ≈30.0  (near-perfect alignment)
+    od=1.0  → κ=∞     (clamped to 1000 — effectively perfect)
+
+    The clamp at κ=1000 means od=0.99999 and od=1.0 are numerically
+    identical. RunConfig.validate_orientation_degree_clamp() warns the
+    user at config-load time when od >= 1.0 or od > 0.95.
 
     Calibrated so that mean|cos θ| matches the qualitative
     orientation_degree label (0=random, 1=perfect).
@@ -532,7 +537,8 @@ def _od_to_kappa(orientation_degree: float) -> float:
         return 0.0
     if orientation_degree >= 1.0:
         return 1000.0
-    return -10.0 * math.log(1.0 - orientation_degree)
+    kappa = -10.0 * math.log(1.0 - orientation_degree)
+    return min(kappa, 1000.0)
 
 
 # ---------------------------------------------------------------------------

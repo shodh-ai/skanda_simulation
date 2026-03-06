@@ -212,8 +212,7 @@ class SiVfMapper:
         cr = comp.compression_ratio
 
         target_inside = comp.vf_si / comp.vf_carbon
-        cv = sim.sei_uniformity_cv if hasattr(sim, "sei_uniformity_cv") else 0.0
-        spatial_cv = 0.10
+        spatial_cv = sim.silicon.embedding_uniformity_cv
 
         si_vf = np.zeros((nx, ny, nz), dtype=np.float64)
 
@@ -273,17 +272,7 @@ class SiVfMapper:
         # Surface distance: min of (dist_into_C, dist_out_of_C)
         surface_dist = np.minimum(dist_from_interior, dist_from_exterior)
 
-        # Si vf peaks at surface (surface_dist=0), decays with Gaussian sigma=1 voxel
-        sigma_vox = max(
-            1.0,
-            (
-                2 * self.sim.silicon.si_r_nm
-                if hasattr(self.sim.silicon, "si_r_nm")
-                else self.comp.si_r_nm
-            )
-            / domain.voxel_size_nm,
-        )
-        sigma_vox = max(1.0, sigma_vox)  # at least 1 voxel wide
+        sigma_vox = max(1.0, self.sim.silicon.r_nm / domain.voxel_size_nm)
 
         si_vf = np.exp(-0.5 * (surface_dist / sigma_vox) ** 2)
 

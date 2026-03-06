@@ -27,21 +27,15 @@ from typing import Set, List
 import numpy as np
 from scipy.ndimage import label as scipy_label
 
+from structure.schema.resolved import ResolvedSimulation
+
 from .composition import CompositionState
 from .domain import DomainGeometry
 from .si_mapper import SiMapResult
 from .cbd_binder import CBDBinderResult
 from .sei import SEIResult
 from ..phases import PHASE_GRAPHITE
-
-
-# ---------------------------------------------------------------------------
-# 6-connectivity structure (shared across module)
-# ---------------------------------------------------------------------------
-_STRUCT6 = np.zeros((3, 3, 3), dtype=np.int8)
-_STRUCT6[1, 1, 0] = _STRUCT6[1, 1, 2] = 1
-_STRUCT6[1, 0, 1] = _STRUCT6[1, 2, 1] = 1
-_STRUCT6[0, 1, 1] = _STRUCT6[2, 1, 1] = 1
+from ._percolation_utils import run_percolation
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +160,7 @@ class PercolationValidator:
         self,
         comp: CompositionState,
         domain: DomainGeometry,
-        sim,  # ResolvedSimulation
+        sim: ResolvedSimulation,
     ) -> None:
         self.comp = comp
         self.domain = domain
@@ -206,12 +200,12 @@ class PercolationValidator:
         # ------------------------------------------------------------------
         # Electronic percolation
         # ------------------------------------------------------------------
-        e_frac, e_n_comp, e_n_perc, elec_perc = _run_percolation(elec_solid)
+        e_frac, e_n_comp, e_n_perc, elec_perc = run_percolation(elec_solid)
 
         # ------------------------------------------------------------------
         # Ionic percolation
         # ------------------------------------------------------------------
-        i_frac, i_n_comp, _, ionic_perc = _run_percolation(pore_mask)
+        i_frac, i_n_comp, _, ionic_perc = run_percolation(pore_mask)
 
         # ------------------------------------------------------------------
         # Warnings
@@ -263,45 +257,6 @@ class PercolationValidator:
             )
 
         return result
-
-
-# ---------------------------------------------------------------------------
-# Core percolation analysis (functional, no class state)
-# ---------------------------------------------------------------------------
-
-
-def _run_percolation(
-    mask: np.ndarray,
-) -> tuple[float, int, int, bool]:
-    """
-    Run connected-component percolation analysis on a binary mask.
-
-    Returns:
-      (percolating_fraction, n_total_components, n_percolating_components, percolates)
-
-    percolating_fraction = voxels in percolating components / total True voxels.
-    A component "percolates" if it touches both Z=0 face and Z=nz-1 face.
-    """
-    N_total = int(mask.sum())
-    if N_total == 0:
-        return 0.0, 0, 0, False
-
-    labeled, n_comp = scipy_label(mask, structure=_STRUCT6)
-
-    # Component labels touching each Z face (exclude background=0)
-    z0_labels: Set[int] = set(labeled[:, :, 0].ravel()) - {0}
-    znz_labels: Set[int] = set(labeled[:, :, -1].ravel()) - {0}
-
-    percolating_labels = z0_labels & znz_labels
-    n_perc = len(percolating_labels)
-
-    if n_perc == 0:
-        return 0.0, n_comp, 0, False
-
-    perc_mask = np.isin(labeled, list(percolating_labels))
-    frac = float(perc_mask.sum()) / N_total
-
-    return frac, n_comp, n_perc, True
 
 
 # ---------------------------------------------------------------------------

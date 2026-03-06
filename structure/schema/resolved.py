@@ -25,6 +25,7 @@ class ResolvedSilicon:
     morphology: str
     internal_porosity: float
     distribution: str
+    embedding_uniformity_cv: float
     void_enabled: bool
     void_fraction: float
     coating_enabled: bool
@@ -44,6 +45,11 @@ class ResolvedSilicon:
     molar_mass_g_mol: float
     vis_color_rgb: tuple[float, float, float]
     vis_color_hex: str
+
+    @property
+    def r_nm(self) -> float:
+        """Particle radius in nm — derived from d50_nm. Read-only."""
+        return self.d50_nm / 2.0
 
 
 @dataclass
@@ -125,6 +131,7 @@ def resolve(cfg: RunConfig, db: MaterialsDB) -> ResolvedSimulation:
         morphology=cfg.si_morphology.value,
         internal_porosity=cfg.si_internal_porosity,
         distribution=cfg.si_distribution.value,
+        embedding_uniformity_cv=cfg.si_embedding_uniformity_cv,
         void_enabled=cfg.si_void_enabled,
         void_fraction=cfg.si_void_fraction,
         coating_enabled=cfg.si_coating_enabled,

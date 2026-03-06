@@ -153,14 +153,28 @@ class SEIShellAdder:
         # ------------------------------------------------------------------
         # 2. Count exposed faces per solid voxel
         # ------------------------------------------------------------------
-        # Convolve pore mask with face kernel:
-        #   exposed_faces[x,y,z] = number of 6-connected pore neighbors
-        # (Use pore_mask so that solid-solid interfaces don't count)
-        exposed_faces = convolve(
-            pore_mask.astype(np.int16),
-            _FACE_KERNEL.astype(np.int16),
-            mode="wrap",  # periodic in X, Y; wrap in Z OK for SEI
-        ).astype(np.int8)
+        # X and Y are periodic — pad with wrap, convolve only Z-faces with constant.
+        # Split the 6-face kernel into XY faces and Z faces separately so we can
+        # apply the correct boundary condition per axis.
+
+        _FACE_KERNEL_XY = np.zeros((3, 3, 3), dtype=np.int8)
+        _FACE_KERNEL_XY[1, 0, 1] = 1  # -Y
+        _FACE_KERNEL_XY[1, 2, 1] = 1  # +Y
+        _FACE_KERNEL_XY[0, 1, 1] = 1  # -X
+        _FACE_KERNEL_XY[2, 1, 1] = 1  # +X
+
+        _FACE_KERNEL_Z = np.zeros((3, 3, 3), dtype=np.int8)
+        _FACE_KERNEL_Z[1, 1, 0] = 1  # -Z
+        _FACE_KERNEL_Z[1, 1, 2] = 1  # +Z
+
+        pore_int = pore_mask.astype(np.int16)
+        exposed_faces_xy = convolve(
+            pore_int, _FACE_KERNEL_XY.astype(np.int16), mode="wrap"
+        )
+        exposed_faces_z = convolve(
+            pore_int, _FACE_KERNEL_Z.astype(np.int16), mode="constant", cval=1
+        )
+        exposed_faces = (exposed_faces_xy + exposed_faces_z).astype(np.int8)
 
         # Surface voxels: solid voxels with ≥1 exposed face
         surface_mask = solid_mask & (exposed_faces >= 1)

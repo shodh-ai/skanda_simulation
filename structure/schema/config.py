@@ -185,6 +185,16 @@ class RunConfig(BaseModel):
     si_void_fraction: float = Field(
         ..., ge=0.20, le=0.50, description="Only active when si_void_enabled == true"
     )
+    si_embedding_uniformity_cv: float = Field(
+        ...,
+        ge=0.0,
+        le=0.60,
+        description=(
+            "Spatial CV of Si loading within one graphite particle. "
+            "Only active when si_distribution == 'embedded'. "
+            "0.0 = perfectly uniform, 0.60 = highly clustered."
+        ),
+    )
     si_coating_enabled: bool
     si_coating_type: SiCoatingType
     si_coating_thickness_nm: float = Field(
@@ -308,6 +318,32 @@ class RunConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def validate_orientation_degree_clamp(self) -> RunConfig:
+        """Warn if carbon_orientation_degree is close enough to 1.0 to hit the κ clamp."""
+        import warnings
+
+        od = self.carbon_orientation_degree
+        if od >= 1.0:
+            warnings.warn(
+                f"carbon_orientation_degree={od} is exactly 1.0. "
+                f"The vMF concentration κ will be clamped to 1000 (perfect Z alignment). "
+                f"Values above 0.95 are physically indistinguishable — "
+                f"consider using 0.95 to avoid the hard clamp.",
+                UserWarning,
+                stacklevel=2,
+            )
+        elif od > 0.95:
+            warnings.warn(
+                f"carbon_orientation_degree={od} is very high (>0.95). "
+                f"κ = {-10.0 * __import__('math').log(1.0 - od):.1f} — "
+                f"particles will be nearly perfectly Z-aligned. "
+                f"This may not be physically representative of a real electrode.",
+                UserWarning,
+                stacklevel=2,
+            )
+        return self
+
+    @model_validator(mode="after")
     def validate_si_coating_thickness_vs_particle(self) -> RunConfig:
         """Coating thickness must be << particle radius (at most 50% of radius)."""
         if self.si_coating_enabled:
@@ -321,8 +357,53 @@ class RunConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_void_fraction_with_flag(self) -> RunConfig:
-        """si_void_fraction is meaningless and ignored when si_void_enabled is False."""
-        # No hard error — just a reminder that the value is silently unused.
+        """Warn if si_void_fraction is set while si_void_enabled is False."""
+        import warnings
+
+        if not self.si_void_enabled:
+            warnings.warn(
+                f"si_void_fraction={self.si_void_fraction} is set but "
+                f"si_void_enabled=False — this value will be ignored. "
+                f"Either set si_void_enabled=true or remove si_void_fraction "
+                f"from the config to avoid confusion.",
+                UserWarning,
+                stacklevel=2,
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_internal_porosity_with_morphology(self) -> RunConfig:
+        """Warn if si_internal_porosity is set while si_morphology != 'porous'."""
+        import warnings
+
+        if self.si_morphology != SiMorphology.POROUS:
+            # Only warn if the value looks intentionally non-default
+            # (anything meaningfully above 0.30 suggests the user expected it to be used)
+            if self.si_internal_porosity > 0.30:
+                warnings.warn(
+                    f"si_internal_porosity={self.si_internal_porosity} is set but "
+                    f"si_morphology='{self.si_morphology.value}' — internal porosity "
+                    f"is only active when si_morphology='porous'. "
+                    f"This value will be ignored.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+        return self
+
+    @model_validator(mode="after")
+    def validate_coating_params_with_flag(self) -> RunConfig:
+        """Warn if coating parameters are set while si_coating_enabled is False."""
+        import warnings
+
+        if not self.si_coating_enabled:
+            if self.si_coating_thickness_nm > 5.0:
+                warnings.warn(
+                    f"si_coating_thickness_nm={self.si_coating_thickness_nm} is set but "
+                    f"si_coating_enabled=False — coating thickness and type will be "
+                    f"ignored. Set si_coating_enabled=true to activate.",
+                    UserWarning,
+                    stacklevel=2,
+                )
         return self
 
 

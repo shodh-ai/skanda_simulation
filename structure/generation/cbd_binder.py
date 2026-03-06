@@ -37,6 +37,7 @@ from .composition import CompositionState
 from .domain import DomainGeometry
 from .si_mapper import SiMapResult
 from ..phases import PHASE_PORE, PHASE_GRAPHITE
+from ._percolation_utils import check_percolates_z
 
 
 # ---------------------------------------------------------------------------
@@ -254,9 +255,7 @@ class CBDBinderMapper:
             cbd_vf_candidate = np.clip(cbd_vf_candidate, 0.0, 1.0)
 
             # Percolation check: CBD + carbon combined must percolate
-            percolates = _check_percolation(
-                solid_mask=(cbd_vf_candidate > 0.05) | carbon_mask
-            )
+            percolates = check_percolates_z((cbd_vf_candidate > 0.05) | carbon_mask)
             if percolates:
                 cbd_vf = cbd_vf_candidate
                 break
@@ -317,7 +316,7 @@ class CBDBinderMapper:
             ]
 
         # Distribution mode
-        dist = getattr(sim, "binder_distribution", "necks")
+        dist = sim.binder_distribution
 
         if dist == "uniform":
             # Simple: binder follows carbon volume
@@ -343,7 +342,7 @@ class CBDBinderMapper:
 
             # 2. Spread into neighboring pore region with Gaussian kernel
             # scale in voxels from binder film thickness
-            t_nm = getattr(sim, "binder_film_thickness_nm", 15.0)
+            t_nm = sim.binder.film_thickness_max_nm
             sigma_vox = max(0.5, t_nm / domain.voxel_size_nm)  # ~0.04 → clamp 0.5
             binder_vf = gaussian_filter(binder_vf, sigma=sigma_vox)
 
@@ -366,54 +365,6 @@ class CBDBinderMapper:
         binder_vf = np.clip(binder_vf, 0.0, 1.0)
 
         return binder_vf, warnings
-
-
-# ---------------------------------------------------------------------------
-# Percolation check
-# ---------------------------------------------------------------------------
-
-
-def _check_percolation(solid_mask: np.ndarray) -> bool:
-    """
-    Simple 3D percolation check:
-      - Start from all solid voxels on z=0
-      - BFS/DFS flood-fill through 6-connected neighbors
-      - If any visited voxel reaches z = nz-1 → percolation
-
-    Returns:
-      True  if percolating in Z
-      False otherwise
-    """
-    nz = solid_mask.shape[2]
-    visited = np.zeros_like(solid_mask, dtype=bool)
-    frontier = []
-
-    # Seed from bottom face z=0
-    z0_solid = solid_mask[:, :, 0]
-    xs, ys = np.where(z0_solid)
-    for x, y in zip(xs, ys):
-        visited[x, y, 0] = True
-        frontier.append((x, y, 0))
-
-    # 6-connected neighbors
-    neighbors = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]
-
-    while frontier:
-        x, y, z = frontier.pop()
-        if z == nz - 1:
-            return True
-        for dx, dy, dz in neighbors:
-            nx_, ny_, nz_ = x + dx, y + dy, z + dz
-            if (
-                0 <= nx_ < solid_mask.shape[0]
-                and 0 <= ny_ < solid_mask.shape[1]
-                and 0 <= nz_ < nz
-                and not visited[nx_, ny_, nz_]
-                and solid_mask[nx_, ny_, nz_]
-            ):
-                visited[nx_, ny_, nz_] = True
-                frontier.append((nx_, ny_, nz_))
-    return False
 
 
 # ---------------------------------------------------------------------------

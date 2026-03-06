@@ -46,18 +46,6 @@ PHASE_NAMES: dict[int, str] = {
     PHASE_SEI: "SEI",
 }
 
-# Fallback colors used ONLY if materials are unavailable (e.g. unit tests).
-# Production code must call build_phase_colors(sim) instead.
-_FALLBACK_COLORS_RGB: dict[int, tuple[float, float, float]] = {
-    PHASE_PORE: (0.92, 0.92, 0.96),
-    PHASE_GRAPHITE: (0.29, 0.29, 0.29),
-    PHASE_SI: (0.69, 0.77, 0.87),
-    PHASE_COATING: (0.18, 0.18, 0.18),
-    PHASE_CBD: (0.10, 0.10, 0.10),
-    PHASE_BINDER: (0.96, 0.87, 0.70),
-    PHASE_SEI: (0.56, 0.93, 0.56),
-}
-
 
 def _rgb_list_to_float(rgb: list[int]) -> tuple[float, float, float]:
     """Convert [R, G, B] in 0-255 range to (r, g, b) in 0.0-1.0 range."""
@@ -88,58 +76,35 @@ def build_phase_colors(
     colors: dict[int, tuple[float, float, float]] = {}
 
     # Pore — no material, fixed neutral background
-    colors[PHASE_PORE] = _FALLBACK_COLORS_RGB[PHASE_PORE]
-
+    colors[PHASE_PORE] = (0.92, 0.92, 0.96)
     # Graphite
-    try:
-        colors[PHASE_GRAPHITE] = _rgb_list_to_float(sim.carbon.material.vis_color_rgb)
-    except Exception:
-        colors[PHASE_GRAPHITE] = _FALLBACK_COLORS_RGB[PHASE_GRAPHITE]
-
+    colors[PHASE_GRAPHITE] = _rgb_list_to_float(sim.carbon.material.vis_color_rgb)
     # Silicon
-    try:
-        colors[PHASE_SI] = _rgb_list_to_float(sim.silicon.vis_color_rgb)
-    except Exception:
-        colors[PHASE_SI] = _FALLBACK_COLORS_RGB[PHASE_SI]
-
+    colors[PHASE_SI] = _rgb_list_to_float(sim.silicon.vis_color_rgb)
     # Coating (carbon_coating or siox_coating)
-    try:
-        colors[PHASE_COATING] = _rgb_list_to_float(
-            sim.silicon.coating_material.vis_color_rgb
-        )
-    except Exception:
-        colors[PHASE_COATING] = _FALLBACK_COLORS_RGB[PHASE_COATING]
-
+    colors[PHASE_COATING] = _rgb_list_to_float(
+        sim.silicon.coating_material.vis_color_rgb
+    )
     # Conductive additive
-    try:
-        colors[PHASE_CBD] = _rgb_list_to_float(sim.additive.vis_color_rgb)
-    except Exception:
-        colors[PHASE_CBD] = _FALLBACK_COLORS_RGB[PHASE_CBD]
-
+    colors[PHASE_CBD] = _rgb_list_to_float(sim.additive.vis_color_rgb)
     # Binder
-    try:
-        colors[PHASE_BINDER] = _rgb_list_to_float(sim.binder.vis_color_rgb)
-    except Exception:
-        colors[PHASE_BINDER] = _FALLBACK_COLORS_RGB[PHASE_BINDER]
-
+    colors[PHASE_BINDER] = _rgb_list_to_float(sim.binder.vis_color_rgb)
     # SEI
-    try:
-        colors[PHASE_SEI] = _rgb_list_to_float(sim.sei_material.vis_color_rgb)
-    except Exception:
-        colors[PHASE_SEI] = _FALLBACK_COLORS_RGB[PHASE_SEI]
+    colors[PHASE_SEI] = _rgb_list_to_float(sim.sei_material.vis_color_rgb)
 
     return colors
 
 
 def build_phase_colors_hex(sim: ResolvedSimulation) -> dict[int, str]:
     """
-    Same as build_phase_colors but returns hex strings — useful for Plotly.
+    Same as build_phase_colors but returns hex strings
 
     Returns dict[phase_id → '#RRGGBB']
     """
     hex_colors: dict[int, str] = {}
 
     _material_map = {
+        PHASE_PORE: lambda: "#EBEBF5",
         PHASE_GRAPHITE: lambda: sim.carbon.material.vis_color_hex,
         PHASE_SI: lambda: sim.silicon.vis_color_hex,
         PHASE_COATING: lambda: sim.silicon.coating_material.vis_color_hex,
@@ -149,15 +114,6 @@ def build_phase_colors_hex(sim: ResolvedSimulation) -> dict[int, str]:
     }
 
     for phase_id in PHASE_NAMES:
-        if phase_id == PHASE_PORE:
-            hex_colors[PHASE_PORE] = "#EAEAF5"
-            continue
-        try:
-            hex_colors[phase_id] = _material_map[phase_id]()
-        except Exception:
-            r, g, b = _FALLBACK_COLORS_RGB[phase_id]
-            hex_colors[phase_id] = "#{:02X}{:02X}{:02X}".format(
-                int(r * 255), int(g * 255), int(b * 255)
-            )
+        hex_colors[phase_id] = _material_map[phase_id]()
 
     return hex_colors

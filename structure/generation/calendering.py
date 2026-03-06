@@ -163,24 +163,66 @@ def calender_fields(
     domain: DomainGeometry,
 ) -> Tuple[SiMapResult, CBDBinderResult]:
     """
-    Resample Si / coating / CBD / binder vf maps along Z to account for
-    calendering (thickness compression).
+    Resample Si / coating / void / CBD / binder vf maps along Z to account
+    for calendering compression.
 
-    Strategy:
-      - All vf maps currently live in the FINAL cubic domain grid already
-        (128³). Steps 2–4 used domain.voxel_size_nm & compression_ratio
-        consistently, so no further Z resampling is strictly required.
-      - However, if we later support pre-calender grids, this function
-        is the correct place to zoom in Z.
+    zoom(field, [1, 1, cr], order=1) compresses the Z axis by cr.
+    The zoomed output has shape (nx, ny, round(nz * cr)) which is then
+    zero-padded back to (nx, ny, nz) — the extra Z voxels at the top
+    correctly become pore after compression.
 
-    For now, calender_fields is a no-op that simply returns the inputs.
-
-    If we ever adopt pre-calender grids (e.g., nz_pre ≠ nz_final), we will:
-      - Use zoom(field, [1, 1, compression_ratio], order=1)
-      - Re-normalize to preserve integrated volume for each phase.
+    Renormalization after zoom conserves the integrated phase volume:
+        sum(out) * V_voxel == sum(original) * V_voxel
     """
-    # Placeholder for future: currently all fields are in final domain coordinates.
-    return si_result, cbd_result
+    cr = comp.compression_ratio
+    nz = domain.nz
+
+    def _compress_vf(field: np.ndarray) -> np.ndarray:
+        """Compress a float vf field in Z, renormalize, return float32."""
+        V_before = float(field.sum())
+        zoomed = zoom(field.astype(np.float32), [1.0, 1.0, cr], order=1)
+        out = np.zeros_like(field, dtype=np.float32)
+        nz_new = min(zoomed.shape[2], nz)
+        out[:, :, :nz_new] = zoomed[:, :, :nz_new]
+        # Renormalize to conserve integrated volume
+        V_after = float(out.sum())
+        if V_after > 1e-10:
+            out *= V_before / V_after
+        return np.clip(out, 0.0, 1.0)
+
+    def _compress_mask(mask: np.ndarray) -> np.ndarray:
+        """Compress a boolean mask in Z using nearest-neighbour interpolation."""
+        zoomed = zoom(mask.astype(np.float32), [1.0, 1.0, cr], order=0)
+        out = np.zeros_like(mask, dtype=bool)
+        nz_new = min(zoomed.shape[2], nz)
+        out[:, :, :nz_new] = zoomed[:, :, :nz_new] > 0.5
+        return out
+
+    new_si_result = SiMapResult(
+        si_vf=_compress_vf(si_result.si_vf),
+        coating_vf=_compress_vf(si_result.coating_vf),
+        void_mask=_compress_mask(si_result.void_mask),
+        V_si_actual_nm3=si_result.V_si_actual_nm3,
+        V_si_target_nm3=si_result.V_si_target_nm3,
+        mass_error_pct=si_result.mass_error_pct,
+        distribution=si_result.distribution,
+        warnings=si_result.warnings,
+    )
+
+    new_cbd_result = CBDBinderResult(
+        cbd_vf=_compress_vf(cbd_result.cbd_vf),
+        binder_vf=_compress_vf(cbd_result.binder_vf),
+        V_cbd_nm3=cbd_result.V_cbd_nm3,
+        V_binder_nm3=cbd_result.V_binder_nm3,
+        V_cbd_target_nm3=cbd_result.V_cbd_target_nm3,
+        V_binder_target_nm3=cbd_result.V_binder_target_nm3,
+        cbd_mass_error_pct=cbd_result.cbd_mass_error_pct,
+        binder_mass_error_pct=cbd_result.binder_mass_error_pct,
+        cbd_percolating=cbd_result.cbd_percolating,
+        warnings=cbd_result.warnings,
+    )
+
+    return new_si_result, new_cbd_result
 
 
 # ---------------------------------------------------------------------------

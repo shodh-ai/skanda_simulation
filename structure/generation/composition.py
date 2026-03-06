@@ -384,10 +384,14 @@ def compute_composition(sim: ResolvedSimulation) -> CompositionState:
     # ── 10. Validation ───────────────────────────────────────────────────────
     warns = _validate(
         N_carbon=N_carbon,
+        N_si=N_si,
         phi_pre=phi_pre,
         vf_si=vf_si_val,
         si_d50_nm=si_d50,
         voxel_size_nm=sim.voxel_size_nm,
+        voxel_resolution=sim.voxel_resolution,
+        porosity=c.target_porosity,
+        compression_ratio=cr,
     )
 
     return CompositionState(
@@ -461,10 +465,14 @@ def _assert_wf_sum(wf_si, wf_carbon, wf_additive, wf_binder) -> None:
 
 def _validate(
     N_carbon: int,
+    N_si: int,
     phi_pre: float,
     vf_si: float,
     si_d50_nm: float,
     voxel_size_nm: float,
+    voxel_resolution: int,
+    porosity: float,
+    compression_ratio: float,
 ) -> list[str]:
     """
     Returns a list of warning strings.
@@ -494,8 +502,8 @@ def _validate(
             f"[CRITICAL] phi_solid_pre={phi_pre:.3f} exceeds RSA jamming limit "
             f"(~{_RSA_JAMMING_LIMIT}) for oblate spheroids. "
             f"RSA will not converge. Options:\n"
-            f"    (a) Decrease target_porosity (currently {1 - phi_pre/phi_pre:.2f})\n"
-            f"    (b) Increase compression_ratio (currently {phi_pre:.2f})"
+            f" (a) Decrease target_porosity (currently {porosity:.2f})\n"
+            f" (b) Increase compression_ratio (currently {compression_ratio:.2f})"
         )
 
     # Si sub-voxel — expected and handled, but flagged for transparency
@@ -510,8 +518,37 @@ def _validate(
     # Si volume fraction unreasonably high
     if vf_si > 0.25:
         warns.append(
-            f"vf_Si={vf_si:.3f} (>{25}%) is unusually high. "
-            f"Verify si_wt_frac_in_am={vf_si:.3f} is intentional."
+            f"vf_Si={vf_si:.3f} (>25%) is unusually high. Verify si_wt_frac_in_am={vf_si:.3f} is intentional."
+        )
+
+    N_voxels_total = voxel_resolution**3
+    particles_per_voxel = N_si / N_voxels_total if N_voxels_total > 0 else 0.0
+
+    if N_si < 100:
+        warns.append(
+            f"[CRITICAL] N_si={N_si:,} is extremely low. "
+            f"The Si VF field will have very high statistical variance "
+            f"({particles_per_voxel:.2f} particles/voxel on average). "
+            f"Si distribution mode results will be unreliable. "
+            f"Increase coating_thickness_um or si_wt_frac_in_am."
+        )
+    elif N_si < 1_000:
+        warns.append(
+            f"N_si={N_si:,} is low ({particles_per_voxel:.2f} particles/voxel). "
+            f"Statistical quality of the Si VF field may be marginal. "
+            f"Consider increasing domain size or Si weight fraction."
+        )
+    elif N_si > 50_000_000:
+        warns.append(
+            f"[INFO] N_si={N_si:,.0f} ({particles_per_voxel:.0f} particles/voxel). "
+            f"Very high Si particle count — VF field statistical quality is excellent. "
+            f"This is normal for nano Si (d50={si_d50_nm:.0f}nm) at this domain size."
+        )
+    else:
+        warns.append(
+            f"[INFO] N_si={N_si:,.0f} ({particles_per_voxel:.1f} particles/voxel). "
+            f"Si VF field statistical representation: "
+            f"{'good' if particles_per_voxel >= 10 else 'adequate'}."
         )
 
     return warns
