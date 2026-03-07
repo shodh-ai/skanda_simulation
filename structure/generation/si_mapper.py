@@ -26,11 +26,6 @@ Normalization:
 
 from __future__ import annotations
 
-import warnings
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Optional
-
 import numpy as np
 from scipy.ndimage import (
     binary_dilation,
@@ -39,80 +34,10 @@ from scipy.ndimage import (
     gaussian_filter,
 )
 
-from structure.schema.resolved import ResolvedSimulation
-
-from .composition import CompositionState
-from .domain import DomainGeometry
-from .carbon_packer import OblateSpheroid, PackingResult
-from ..phases import PHASE_GRAPHITE
-
-
-# ---------------------------------------------------------------------------
-# Distribution mode
-# ---------------------------------------------------------------------------
-
-
-class SiDistribution(str, Enum):
-    EMBEDDED = "embedded"
-    SURFACE_ANCHORED = "surface_anchored"
-    CORE_SHELL = "core_shell"
-
-
-# ---------------------------------------------------------------------------
-# Output dataclass
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class SiMapResult:
-    """
-    Output of SiVfMapper.map().
-
-    si_vf      : float32 (nx, ny, nz) — local Si volume fraction per voxel
-    coating_vf : float32 (nx, ny, nz) — local coating volume fraction per voxel
-                 (zero if si_coating_enabled=False)
-    void_mask  : bool    (nx, ny, nz) — True where void space is reserved
-                 around Si particles (expansion buffer)
-    V_si_actual: float   — actual Si volume placed (nm³), should match V_Si_target
-    V_si_target: float   — target Si volume (nm³) from CompositionState
-    mass_error_pct: float — |actual - target| / target × 100 (should be < 0.1%)
-    distribution:  str   — which mode was used
-    warnings:      list[str]
-    """
-
-    si_vf: np.ndarray
-    coating_vf: np.ndarray
-    void_mask: np.ndarray
-    V_si_actual_nm3: float
-    V_si_target_nm3: float
-    mass_error_pct: float
-    distribution: str
-    warnings: list[str] = field(default_factory=list)
-
-    def summary(self) -> str:
-        lines = [
-            "=" * 62,
-            "  SI VF MAP",
-            "=" * 62,
-            f"  Distribution      : {self.distribution}",
-            f"  V_Si target       : {self.V_si_target_nm3:.4e} nm³",
-            f"  V_Si actual       : {self.V_si_actual_nm3:.4e} nm³",
-            f"  Mass error        : {self.mass_error_pct:.4f}%",
-            f"  si_vf  max        : {self.si_vf.max():.4f}",
-            (
-                f"  si_vf  mean(>0)   : {self.si_vf[self.si_vf>0].mean():.4f}"
-                if self.si_vf.any()
-                else "  si_vf  mean(>0)   : N/A"
-            ),
-            f"  Voxels with Si>0  : {(self.si_vf > 0).sum():,}",
-            f"  Coating voxels>0  : {(self.coating_vf > 0).sum():,}",
-            f"  Void voxels       : {self.void_mask.sum():,}",
-        ]
-        if self.warnings:
-            lines += ["", f"  ⚠  {len(self.warnings)} WARNING(s):"]
-            lines += [f"     [{i+1}] {w}" for i, w in enumerate(self.warnings)]
-        lines.append("=" * 62)
-        return "\n".join(lines)
+from structure.schema import ResolvedSimulation
+from structure.schema.config import SiDistribution
+from structure.data import SiMapResult, CompositionState, DomainGeometry, PackingResult
+from structure.phases import PHASE_GRAPHITE
 
 
 # ---------------------------------------------------------------------------
@@ -162,11 +87,11 @@ class SiVfMapper:
             raise ValueError(f"Unknown si_distribution: {dist}")
 
         # ── Void space (expansion buffer) ─────────────────────────────────
-        void_mask = self._build_void_mask(si_vf, carbon_label)
         if sim.silicon.void_enabled:
-            # Suppress Si vf in void zones — void volume fraction reduces
-            # local Si loading to make room for expansion during lithiation
+            void_mask = self._build_void_mask(si_vf, carbon_label)
             si_vf[void_mask] *= 1.0 - sim.silicon.void_fraction
+        else:
+            void_mask = np.zeros(si_vf.shape, dtype=bool)  # sentinel: not computed
 
         # ── Coating shell ─────────────────────────────────────────────────
         coating_vf = self._build_coating_vf(si_vf, carbon_label)
@@ -178,6 +103,7 @@ class SiVfMapper:
             si_vf=si_vf.astype(np.float32),
             coating_vf=coating_vf.astype(np.float32),
             void_mask=void_mask,
+            void_enabled=sim.silicon.void_enabled,
             V_si_actual_nm3=V_actual,
             V_si_target_nm3=V_target,
             mass_error_pct=err_pct,
@@ -186,7 +112,6 @@ class SiVfMapper:
         )
 
     # ── Distribution modes ────────────────────────────────────────────────
-
     def _embedded(
         self,
         carbon_label: np.ndarray,
@@ -197,12 +122,17 @@ class SiVfMapper:
         Si embedded homogeneously within each carbon particle's volume.
 
         For each carbon particle:
-          1. Identify interior voxels via the analytical spheroid test
-          2. Assign si_vf_local = target_inside × N(1, uniformity_cv²)
-             (spatial noise models inhomogeneous Si mixing within the flake)
+        1. Compute AABB in final-domain voxel indices (periodic X/Y, clamped Z)
+        2. Build sub-meshgrid of voxel centres for that AABB only
+        3. Run analytical spheroid membership test on the sub-grid
+        4. Assign si_vf_local = target_inside × N(1, embedding_uniformity_cv²)
 
         target_inside = vf_Si / vf_C
-          = fraction of each carbon voxel volume occupied by Si
+            = fraction of each carbon voxel volume occupied by Si
+
+        AABB half-extent = ceil(p.a / vs) + 1  (p.a is the max semi-axis)
+        Cost: O(N_carbon × AABB³) vs O(N_carbon × nx × ny × nz) before.
+        Typical speedup: ~60× at 128³ for 12µm graphite (AABB ≈ 32³).
         """
         comp = self.comp
         domain = self.domain
@@ -210,31 +140,91 @@ class SiVfMapper:
         nx, ny, nz = domain.nx, domain.ny, domain.nz
         vs = domain.voxel_size_nm
         cr = comp.compression_ratio
+        Lx = domain.Lx_nm
+        Ly = domain.Ly_nm
 
         target_inside = comp.vf_si / comp.vf_carbon
         spatial_cv = sim.silicon.embedding_uniformity_cv
 
         si_vf = np.zeros((nx, ny, nz), dtype=np.float64)
 
-        # Voxel center coordinates (final / post-calender domain)
-        xs = (np.arange(nx) + 0.5) * vs
-        ys = (np.arange(ny) + 0.5) * vs
-        zs = (np.arange(nz) + 0.5) * vs
-        Xg, Yg, Zg = np.meshgrid(xs, ys, zs, indexing="ij")
-
         for p in packing.particles:
-            inside = _voxels_inside_spheroid(
-                Xg, Yg, Zg, p, domain.Lx_nm, domain.Ly_nm, cr
-            )
+            # ── Final-domain centre ──────────────────────────────────────────
+            cx = p.center[0]
+            cy = p.center[1]
+            cz = p.center[2] * cr  # compressed Z in final domain
+
+            # ── AABB half-extent in voxels ───────────────────────────────────
+            # p.a is the largest semi-axis (a >= c for oblate spheroid).
+            # Conservative bound: any point on the spheroid satisfies
+            # |Δx|, |Δy|, |Δz| ≤ p.a in the lab frame.
+            half = int(np.ceil(p.a / vs)) + 1
+
+            # ── Integer index ranges ─────────────────────────────────────────
+            ix_c = int(cx / vs)
+            iy_c = int(cy / vs)
+            iz_c = int(cz / vs)
+
+            ix_arr = np.arange(ix_c - half, ix_c + half + 1)
+            iy_arr = np.arange(iy_c - half, iy_c + half + 1)
+            iz_arr = np.arange(iz_c - half, iz_c + half + 1)
+
+            # Z — hard wall: clamp to valid range
+            iz_arr = iz_arr[(iz_arr >= 0) & (iz_arr < nz)]
+            if iz_arr.size == 0:
+                continue
+
+            # X, Y — periodic: wrap with modulo for storage indices
+            ix_w = ix_arr % nx
+            iy_w = iy_arr % ny
+
+            # ── Sub-grid voxel centres (actual nm coordinates, may exceed Lx/Ly)
+            # Using unmodded ix_arr/iy_arr here so minimum-image displacement
+            # is computed correctly before applying modulo for storage.
+            xs_sub = (ix_arr + 0.5) * vs
+            ys_sub = (iy_arr + 0.5) * vs
+            zs_sub = (iz_arr + 0.5) * vs
+
+            Xs, Ys, Zs = np.meshgrid(xs_sub, ys_sub, zs_sub, indexing="ij")
+
+            # ── Displacement from particle centre (minimum image for X, Y) ──
+            dx = Xs - cx
+            dx -= Lx * np.round(dx / Lx)  # minimum image — periodic X
+            dy = Ys - cy
+            dy -= Ly * np.round(dy / Ly)  # minimum image — periodic Y
+            dz = Zs - cz  # hard wall Z — no wrapping
+
+            # ── Particle body-frame coordinates ─────────────────────────────
+            RT = p.R.T
+            dx_b = RT[0, 0] * dx + RT[0, 1] * dy + RT[0, 2] * dz
+            dy_b = RT[1, 0] * dx + RT[1, 1] * dy + RT[1, 2] * dz
+            dz_b = RT[2, 0] * dx + RT[2, 1] * dy + RT[2, 2] * dz
+
+            # ── Spheroid membership test ─────────────────────────────────────
+            inside = (dx_b / p.a) ** 2 + (dy_b / p.a) ** 2 + (dz_b / p.c) ** 2 <= 1.0
+
             if not inside.any():
                 continue
 
-            # Spatially varying Si loading within this particle
+            # ── Spatially varying Si loading within this particle ────────────
             noise = rng.normal(1.0, spatial_cv, size=inside.sum())
             noise = np.clip(noise, 0.0, None)
-            si_vf[inside] += target_inside * noise
 
-        # Smooth slightly to avoid hard per-particle edges
+            # ── Write back to global grid using wrapped storage indices ──────
+            # Broadcasting to (len(ix_arr), len(iy_arr), len(iz_arr)) shape.
+            ixg = ix_w[:, None, None] * np.ones(
+                (1, len(iy_arr), len(iz_arr)), dtype=np.intp
+            )
+            iyg = iy_w[None, :, None] * np.ones(
+                (len(ix_arr), 1, len(iz_arr)), dtype=np.intp
+            )
+            izg = iz_arr[None, None, :] * np.ones(
+                (len(ix_arr), len(iy_arr), 1), dtype=np.intp
+            )
+
+            si_vf[ixg[inside], iyg[inside], izg[inside]] += target_inside * noise
+
+        # Smooth slightly to remove hard per-particle edges
         si_vf = gaussian_filter(si_vf, sigma=0.5)
         return si_vf
 
@@ -319,11 +309,12 @@ class SiVfMapper:
         # Distance from carbon surface (inward)
         dist_inward = distance_transform_edt(carbon_mask)  # voxels into C interior
 
-        # Shell thickness: use coating thickness if enabled, else 20% of c-axis
-        if sim.silicon.coating_enabled:
-            shell_t_nm = sim.silicon.coating_thickness_nm
-        else:
-            shell_t_nm = comp.carbon_c_nm * 0.20  # 20% of flake half-thickness
+        # Shell thickness
+        shell_t_nm = sim.silicon.core_shell_carbon_thickness_nm
+        if shell_t_nm <= 0.0:
+            # Fallback: 20% of carbon particle c-axis half-thickness
+            shell_t_nm = comp.carbon_c_nm * 0.20
+            self.domain  # (silence linter — comp is in scope)
 
         shell_t_vox = max(1.0, shell_t_nm / domain.voxel_size_nm)
 
@@ -367,11 +358,9 @@ class SiVfMapper:
         si_support = si_vf > 0.01  # voxels with meaningful Si presence
         struct = generate_binary_structure(3, 1)  # 6-connectivity
         dilated = binary_dilation(si_support, structure=struct, iterations=1)
-        void_band = dilated & ~si_support
-        return void_band
+        return dilated & ~si_support
 
     # ── Coating vf ────────────────────────────────────────────────────────
-
     def _build_coating_vf(
         self,
         si_vf: np.ndarray,
@@ -385,11 +374,20 @@ class SiVfMapper:
         Instead, each Si-containing voxel gets a coating_vf proportional
         to the Si surface area in that voxel:
 
-            coating_vf = si_vf × (coating_thickness_nm / r_Si) × 3
-                       = si_vf × (3t/r)
+            coating_vf = si_vf × (3t/r)
 
         This is the thin-shell volume ratio for a sphere:
             V_shell / V_sphere ≈ 3t/r  for t << r
+
+        Coating is physically suppressed wherever the voxel is already
+        dominated by carbon matrix (carbon_vf = 1). In embedded and
+        core_shell modes Si lives inside carbon particles — the Si-C
+        interface is already solid, so coating cannot occupy additional
+        volume there without pushing solid_sum > 1.
+
+        Specifically: coating_vf is zeroed wherever carbon_label == PHASE_GRAPHITE.
+        In surface_anchored mode, Si sits at the carbon boundary facing pore
+        space — this mask leaves most coating_vf intact there.
 
         Returns zero array if si_coating_enabled=False.
         """
@@ -402,6 +400,11 @@ class SiVfMapper:
 
         thin_shell_ratio = 3.0 * t / r  # V_shell / V_sphere
         coating_vf = si_vf * thin_shell_ratio
+
+        # Suppress coating inside carbon voxels — Si-C interface is already
+        # solid; coating here would cause carbon_vf + coating_vf > 1.
+        carbon_mask = carbon_label == PHASE_GRAPHITE
+        coating_vf[carbon_mask] = 0.0
 
         # Coating cannot exceed 1.0 (physical cap)
         coating_vf = np.clip(coating_vf, 0.0, 1.0)
@@ -454,50 +457,8 @@ class SiVfMapper:
 
 
 # ---------------------------------------------------------------------------
-# Geometry helper (shared with voxelizer)
-# ---------------------------------------------------------------------------
-
-
-def _voxels_inside_spheroid(
-    Xg: np.ndarray,
-    Yg: np.ndarray,
-    Zg: np.ndarray,
-    p: OblateSpheroid,
-    Lx: float,
-    Ly: float,
-    compression_ratio: float,
-) -> np.ndarray:
-    """
-    Return boolean mask of voxels whose centers fall inside oblate spheroid p.
-    Z is compressed: z_final = z_pre × compression_ratio.
-    Periodic boundary applied in X, Y.
-    """
-    cx = p.center[0]
-    cy = p.center[1]
-    cz = p.center[2] * compression_ratio
-
-    dx = Xg - cx
-    dy = Yg - cy
-    dz = Zg - cz
-
-    # Minimum image convention for X, Y
-    dx = dx - Lx * np.round(dx / Lx)
-    dy = dy - Ly * np.round(dy / Ly)
-
-    # Rotate into body frame
-    RT = p.R.T
-    dx_b = RT[0, 0] * dx + RT[0, 1] * dy + RT[0, 2] * dz
-    dy_b = RT[1, 0] * dx + RT[1, 1] * dy + RT[1, 2] * dz
-    dz_b = RT[2, 0] * dx + RT[2, 1] * dy + RT[2, 2] * dz
-
-    return (dx_b / p.a) ** 2 + (dy_b / p.a) ** 2 + (dz_b / p.c) ** 2 <= 1.0
-
-
-# ---------------------------------------------------------------------------
 # Public factory
 # ---------------------------------------------------------------------------
-
-
 def map_si_distribution(
     comp: CompositionState,
     domain: DomainGeometry,

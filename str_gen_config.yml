@@ -111,6 +111,15 @@ si_embedding_uniformity_cv:
   # Mid (0.15 – 0.30): moderately patchy
   # High (0.30 – 0.60): highly clustered intra-particle
 
+si_core_shell_carbon_thickness_nm:
+  50.0 # Structural C-shell thickness in nm
+  # Range: 10 – 500 nm
+  # Typical: 20–100 nm for nano-Si cores
+  #          50–200 nm for micro-Si cores
+  # If 0.0: falls back to 20% of carbon c-axis (legacy behaviour)
+  # Rule of thumb: ~10–20% of total particle radius
+  # Thicker shell → smaller Si core → lower capacity, better stability
+
 si_void_enabled: true # Hollow buffer zone around Si for volume expansion
 si_void_fraction:
   0.30 # Buffer void vol / Si particle vol
@@ -210,6 +219,18 @@ sei:
     0.30 # Spatial thickness variation, σ/μ
     # Range: 0.00 – 1.00
     #   0.0 = perfectly uniform | 1.0 = highly variable
+  sei_correlation_length_nm:
+    500.0 # Spatial correlation length of SEI thickness variation (nm)
+    # Controls the GRF smoothing sigma: sigma_vox = sei_correlation_length_nm
+    #                                               / voxel_size_nm
+    # Range: 50 – 5000 nm
+    #   50   – 200  nm : variation decorrelates within one particle surface
+    #   200  – 1000 nm : variation correlated across ~1 particle diameter
+    #   1000 – 5000 nm : large-scale patches spanning multiple particles
+    # Resolution-invariant: same nm value gives consistent physics at
+    # 64³ (780nm/vox) and 128³ (390nm/vox).
+    # Rule of thumb: set to ~0.5–1× carbon_particle_d50_nm for
+    # particle-scale SEI non-uniformity.
 
 # =============================================================================
 # MICROSTRUCTURE CONSTRAINTS

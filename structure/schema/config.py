@@ -97,6 +97,17 @@ class SEIConfig(BaseModel):
     uniformity_cv: float = Field(
         ..., ge=0.00, le=1.00, description="Spatial thickness variation σ/μ"
     )
+    sei_correlation_length_nm: float = Field(
+        ...,
+        gt=0.0,
+        le=10000.0,
+        description=(
+            "Spatial correlation length of SEI thickness GRF variation (nm). "
+            "Converted to voxels as sei_correlation_length_nm / voxel_size_nm. "
+            "Resolution-invariant: same value produces consistent spatial "
+            "structure at any voxel size."
+        ),
+    )
 
 
 class PercolationConfig(BaseModel):
@@ -193,6 +204,17 @@ class RunConfig(BaseModel):
             "Spatial CV of Si loading within one graphite particle. "
             "Only active when si_distribution == 'embedded'. "
             "0.0 = perfectly uniform, 0.60 = highly clustered."
+        ),
+    )
+    si_core_shell_carbon_thickness_nm: float = Field(
+        ...,
+        ge=0.0,
+        le=500.0,
+        description=(
+            "Structural carbon shell thickness (nm) in Si@C core-shell particles. "
+            "Only active when si_distribution='core_shell'. "
+            "Physically distinct from si_coating_thickness_nm (thin passivation). "
+            "0.0 = fallback to 20%% of carbon c-axis half-thickness."
         ),
     )
     si_coating_enabled: bool
@@ -376,18 +398,18 @@ class RunConfig(BaseModel):
         """Warn if si_internal_porosity is set while si_morphology != 'porous'."""
         import warnings
 
-        if self.si_morphology != SiMorphology.POROUS:
-            # Only warn if the value looks intentionally non-default
-            # (anything meaningfully above 0.30 suggests the user expected it to be used)
-            if self.si_internal_porosity > 0.30:
-                warnings.warn(
-                    f"si_internal_porosity={self.si_internal_porosity} is set but "
-                    f"si_morphology='{self.si_morphology.value}' — internal porosity "
-                    f"is only active when si_morphology='porous'. "
-                    f"This value will be ignored.",
-                    UserWarning,
-                    stacklevel=2,
-                )
+        if (
+            self.si_morphology != SiMorphology.POROUS
+            and self.si_internal_porosity > 0.30
+        ):
+            warnings.warn(
+                f"si_internal_porosity={self.si_internal_porosity} is set but "
+                f"si_morphology='{self.si_morphology.value}' — internal porosity "
+                f"is only active when si_morphology='porous'. "
+                f"This value will be ignored.",
+                UserWarning,
+                stacklevel=2,
+            )
         return self
 
     @model_validator(mode="after")
@@ -395,15 +417,72 @@ class RunConfig(BaseModel):
         """Warn if coating parameters are set while si_coating_enabled is False."""
         import warnings
 
-        if not self.si_coating_enabled:
-            if self.si_coating_thickness_nm > 5.0:
-                warnings.warn(
-                    f"si_coating_thickness_nm={self.si_coating_thickness_nm} is set but "
-                    f"si_coating_enabled=False — coating thickness and type will be "
-                    f"ignored. Set si_coating_enabled=true to activate.",
-                    UserWarning,
-                    stacklevel=2,
-                )
+        if not self.si_coating_enabled and self.si_coating_thickness_nm > 5.0:
+            warnings.warn(
+                f"si_coating_thickness_nm={self.si_coating_thickness_nm} is set but "
+                f"si_coating_enabled=False — coating thickness and type will be "
+                f"ignored. Set si_coating_enabled=true to activate.",
+                UserWarning,
+                stacklevel=2,
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_core_shell_thickness(self) -> RunConfig:
+        """
+        Warn if si_core_shell_carbon_thickness_nm is set while
+        si_distribution != 'core_shell' — value will be silently unused.
+        Also warn if the shell is so thick the Si core would be negligible.
+        """
+        import warnings
+
+        if (
+            self.si_distribution != SiDistribution.CORE_SHELL
+            and self.si_core_shell_carbon_thickness_nm > 0.0
+        ):
+            warnings.warn(
+                f"si_core_shell_carbon_thickness_nm="
+                f"{self.si_core_shell_carbon_thickness_nm} is set but "
+                f"si_distribution='{self.si_distribution.value}' — "
+                f"this value is only used when si_distribution='core_shell'.",
+                UserWarning,
+                stacklevel=2,
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_sei_correlation_vs_resolution(self) -> RunConfig:
+        """
+        Warn if sei_correlation_length_nm is smaller than one voxel —
+        the GRF sigma would be < 1.0 voxels, making it effectively white noise
+        and indistinguishable from sei_uniformity_cv=0.
+        Also warn if it exceeds the full domain size (correlation larger than
+        the electrode thickness is unphysical).
+        """
+        import warnings
+
+        sigma_vox = self.sei.sei_correlation_length_nm / self.voxel_size_nm
+        domain_z_nm = self.coating_thickness_um * 1000.0
+
+        if sigma_vox < 1.0:
+            warnings.warn(
+                f"sei_correlation_length_nm={self.sei.sei_correlation_length_nm}nm "
+                f"is smaller than one voxel ({self.voxel_size_nm}nm) — "
+                f"sigma_vox={sigma_vox:.3f} < 1.0. The GRF will be "
+                f"effectively white noise. Increase sei_correlation_length_nm "
+                f"to at least {self.voxel_size_nm:.0f}nm (one voxel).",
+                UserWarning,
+                stacklevel=2,
+            )
+        if self.sei.sei_correlation_length_nm > domain_z_nm:
+            warnings.warn(
+                f"sei_correlation_length_nm={self.sei.sei_correlation_length_nm}nm "
+                f"exceeds the electrode thickness "
+                f"({domain_z_nm:.0f}nm = coating_thickness_um × 1000). "
+                f"SEI correlation length larger than the domain is unphysical.",
+                UserWarning,
+                stacklevel=2,
+            )
         return self
 
 

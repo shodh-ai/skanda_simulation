@@ -1,14 +1,12 @@
 """
-Shared percolation utilities — used by both cbd_binder.py (Step 4)
-and percolation.py (Step 7).
+Shared percolation utilities
 
 Kept in a separate module to avoid the circular import that would arise
 from cbd_binder importing percolation (which already imports cbd_binder
 for CBDBinderResult).
 
 Both public functions use scipy.ndimage.label (C-level union-find)
-for consistent behaviour and speed (~50ms on 128³ vs ~seconds for
-pure-Python BFS).
+for consistent behaviour and speed (~50ms on 128³).
 """
 
 from __future__ import annotations

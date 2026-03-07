@@ -31,6 +31,7 @@ class ResolvedSilicon:
     coating_enabled: bool
     coating_type: str
     coating_thickness_nm: float
+    core_shell_carbon_thickness_nm: float
     coating_material: Optional[CoatingMaterial]
     # Size-dependent (computed from si_base correlations)
     BET_m2_g: float
@@ -97,6 +98,7 @@ class ResolvedSimulation:
     sei_material: SEIMaterial
     sei_thickness_nm: float
     sei_uniformity_cv: float
+    sei_correlation_length_nm: float
 
     percolation_enforce: bool
     percolation_min_threshold: float
@@ -137,6 +139,7 @@ def resolve(cfg: RunConfig, db: MaterialsDB) -> ResolvedSimulation:
         coating_enabled=cfg.si_coating_enabled,
         coating_type=cfg.si_coating_type.value,
         coating_thickness_nm=cfg.si_coating_thickness_nm,
+        core_shell_carbon_thickness_nm=cfg.si_core_shell_carbon_thickness_nm,
         coating_material=coating_mat,
         # Computed
         BET_m2_g=si_db.compute_BET(cfg.si_particle_d50_nm),
@@ -173,6 +176,27 @@ def resolve(cfg: RunConfig, db: MaterialsDB) -> ResolvedSimulation:
         target_porosity=cfg.target_porosity,
     )
 
+    import warnings as _warnings
+
+    if cfg.si_distribution.value == "core_shell":
+        carbon_a_nm = cfg.carbon_particle_d50_nm / 2.0
+        carbon_c_nm = (
+            carbon_a_nm / db.get_graphite(cfg.carbon_type.value).aspect_ratio_mean
+        )
+        shell_t = cfg.si_core_shell_carbon_thickness_nm
+        if shell_t > 0.0 and shell_t > 0.40 * carbon_c_nm:
+            _warnings.warn(
+                f"si_core_shell_carbon_thickness_nm={shell_t:.1f}nm is "
+                f">40% of carbon c-axis half-thickness "
+                f"({carbon_c_nm:.1f}nm = (d50/2) / aspect_ratio_mean = "
+                f"{carbon_a_nm:.1f} / "
+                f"{db.get_graphite(cfg.carbon_type.value).aspect_ratio_mean}). "
+                f"Si core volume will be very small "
+                f"— consider reducing si_core_shell_carbon_thickness_nm.",
+                UserWarning,
+                stacklevel=2,
+            )
+
     return ResolvedSimulation(
         run_id=cfg.run_id,
         seed=cfg.seed,
@@ -192,6 +216,7 @@ def resolve(cfg: RunConfig, db: MaterialsDB) -> ResolvedSimulation:
         sei_material=db.sei_generic,
         sei_thickness_nm=cfg.sei.thickness_nm,
         sei_uniformity_cv=cfg.sei.uniformity_cv,
+        sei_correlation_length_nm=cfg.sei.sei_correlation_length_nm,
         percolation_enforce=cfg.percolation.enforce,
         percolation_min_threshold=cfg.percolation.min_threshold,
         contacts_coordination_number=cfg.contacts.coordination_number,

@@ -26,119 +26,26 @@ Physical model:
 from __future__ import annotations
 
 import math
-import warnings
-from dataclasses import dataclass, field
-from typing import Optional
-
 import numpy as np
-from scipy.optimize import minimize_scalar
-
-from structure.schema.resolved import ResolvedSimulation
-
-from .composition import CompositionState
-from .domain import DomainGeometry
-from ..phases import PHASE_GRAPHITE
-
-
-# ---------------------------------------------------------------------------
-# OblateSpheroid dataclass
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class OblateSpheroid:
-    """
-    One graphite flake particle in nm coordinates.
-
-    Attributes:
-        center  : [x, y, z] position in nm (pre-calendering coordinates)
-        a       : basal semi-axis (nm) — the two equal long axes
-        c       : thickness semi-axis (nm) = a / aspect_ratio
-        R       : 3×3 rotation matrix; columns are the body-frame axes
-                  in the lab frame. The c-axis is R[:, 2].
-        A_inv   : cached inverse shape matrix = inv(R @ diag(a⁻²,a⁻²,c⁻²) @ R.T)
-                  pre-computed once to avoid repeated inversion during overlap checks
-        phase_id: always PHASE_GRAPHITE = 1
-    """
-
-    center: np.ndarray
-    a: float
-    c: float
-    R: np.ndarray
-    A_inv: np.ndarray = field(repr=False)
-    phase_id: int = PHASE_GRAPHITE
-
-    @property
-    def volume_nm3(self) -> float:
-        return (4.0 / 3.0) * math.pi * self.a**2 * self.c
-
-    @property
-    def aspect_ratio(self) -> float:
-        return self.a / self.c
-
-    @property
-    def c_axis(self) -> np.ndarray:
-        """Unit vector along the c-axis (thickness direction) in lab frame."""
-        return self.R[:, 2]
-
-    @property
-    def bounding_radius(self) -> float:
-        """Radius of the smallest enclosing sphere. Used for fast rejection."""
-        return self.a  # a ≥ c always for oblate
-
-
-# ---------------------------------------------------------------------------
-# PackingResult
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class PackingResult:
-    """
-    Output of CarbonScaffoldPacker.pack().
-    Contains the placed particles and packing diagnostics.
-    """
-
-    particles: list[OblateSpheroid]
-    N_placed: int
-    N_target: int
-    phi_achieved: float  # actual solid volume fraction in pre-calender box
-    phi_target: float  # target from CompositionState
-    inflated: bool  # True if jamming escape was triggered
-    inflation_factor: float  # XY scale applied during escape (1.0 if no inflation)
-    total_attempts: int
-    warnings: list[str] = field(default_factory=list)
-
-    def summary(self) -> str:
-        status = "INFLATED (jamming escape)" if self.inflated else "RSA converged"
-        lines = [
-            "=" * 62,
-            "  CARBON SCAFFOLD PACKING",
-            "=" * 62,
-            f"  Status            : {status}",
-            f"  Particles placed  : {self.N_placed} / {self.N_target}",
-            f"  φ_solid achieved  : {self.phi_achieved:.4f}"
-            f"  (target {self.phi_target:.4f},"
-            f"  Δ = {abs(self.phi_achieved - self.phi_target):.4f})",
-            f"  Total RSA attempts: {self.total_attempts:,}",
-        ]
-        if self.inflated:
-            lines.append(
-                f"  Inflation factor  : {self.inflation_factor:.4f}"
-                f"  (XY basal axes scaled by this factor)"
-            )
-        if self.warnings:
-            lines += ["", f"  ⚠  {len(self.warnings)} WARNING(s):"]
-            lines += [f"     [{i+1}] {w}" for i, w in enumerate(self.warnings)]
-        lines.append("=" * 62)
-        return "\n".join(lines)
+from structure.schema import ResolvedSimulation
+from structure.data import (
+    CompositionState,
+    DomainGeometry,
+    OblateSpheroid,
+    PackingResult,
+)
+from structure.utils.carbon_packer import (
+    _make_spheroid,
+    _sample_size,
+    _sample_rotation,
+    _od_to_kappa,
+    _spheroids_overlap,
+)
 
 
 # ---------------------------------------------------------------------------
 # CarbonScaffoldPacker
 # ---------------------------------------------------------------------------
-
-
 class CarbonScaffoldPacker:
     """
     Places N_carbon oblate spheroids in the pre-calendering domain via RSA.
@@ -162,16 +69,14 @@ class CarbonScaffoldPacker:
         comp: CompositionState,
         domain: DomainGeometry,
         orientation_degree: float,
-        orientation_enhancement: float = 0.0,
     ) -> None:
         self.comp = comp
         self.domain = domain
         self.orientation_degree = orientation_degree
-        self.orientation_enhancement = orientation_enhancement
 
         # Spatial grid cell size = 2 × max possible basal radius
         # max(a) ≈ d50 * (1 + 3*cv) as a conservative 3σ upper bound
-        max_a = (comp.carbon_d50_nm / 2.0) * (1.0 + 3.0 * 0.25)
+        max_a = (comp.carbon_d50_nm / 2.0) * (1.0 + 3.0 * comp.carbon_size_cv)
         self._cell_size = 2.0 * max_a
         self._grid: dict[tuple[int, int, int], list[int]] = {}
         self._particles: list[OblateSpheroid] = []
@@ -236,6 +141,19 @@ class CarbonScaffoldPacker:
                         domain=domain,
                     )
                     inflated = True
+
+                    n_overlap, n_checked = self._count_overlapping_pairs()
+                    if n_overlap > 0:
+                        overlap_pct = 100.0 * n_overlap / max(n_checked, 1)
+                        warns.append(
+                            f"Post-inflation overlap (jamming escape at particle {i+1}/{N}): "
+                            f"{n_overlap}/{n_checked} particle pairs intersect "
+                            f"({overlap_pct:.1f}%). "
+                            f"Packing is unphysical — microstructure has forced overlaps. "
+                            f"To avoid: (a) reduce target_porosity, "
+                            f"(b) reduce carbon_particle_d50_nm, "
+                            f"(c) increase coating_thickness_um."
+                        )
                     break  # stop trying to place this particle
 
             if total_attempts >= self.MAX_TOTAL_ATTEMPTS:
@@ -258,6 +176,23 @@ class CarbonScaffoldPacker:
                 f"φ gap (inflation_factor={inflation_factor:.4f})"
             )
 
+            n_overlap, n_checked = self._count_overlapping_pairs()
+            if n_overlap > 0:
+                overlap_pct = 100.0 * n_overlap / max(n_checked, 1)
+                warns.append(
+                    f"Post-inflation overlap (post-RSA gap close): "
+                    f"{n_overlap}/{n_checked} particle pairs intersect "
+                    f"({overlap_pct:.1f}%). "
+                    f"Packing is unphysical — microstructure has forced overlaps. "
+                    f"To avoid: (a) reduce target_porosity, "
+                    f"(b) reduce carbon_particle_d50_nm, "
+                    f"(c) increase coating_thickness_um."
+                )
+
+        final_n_overlap, final_n_checked = (
+            self._count_overlapping_pairs() if inflated else (0, 0)
+        )
+
         return PackingResult(
             particles=list(self._particles),
             N_placed=N_placed,
@@ -267,6 +202,8 @@ class CarbonScaffoldPacker:
             inflated=inflated,
             inflation_factor=inflation_factor,
             total_attempts=total_attempts,
+            n_overlapping_pairs=final_n_overlap,
+            n_pairs_checked=final_n_checked,
             warnings=warns,
         )
 
@@ -364,188 +301,44 @@ class CarbonScaffoldPacker:
         f = min(f, 2.0)
 
         for p in self._particles:
+            p.invalidate_shape_matrix()
             p.a = p.a * f
-            # Recompute A_inv with new a
-            D = np.diag([1.0 / p.a**2, 1.0 / p.a**2, 1.0 / p.c**2])
-            p.A_inv = np.linalg.inv(p.R @ D @ p.R.T)
+            p.recompute_shape_matrix()
 
         return f
 
+    def _count_overlapping_pairs(self) -> tuple[int, int]:
+        """
+        Count intersecting particle pairs after inflation using the spatial grid.
 
-# ---------------------------------------------------------------------------
-# Geometry helpers (module-level, no class state)
-# ---------------------------------------------------------------------------
+        Uses the same grid-accelerated neighbor lookup as the RSA loop so
+        complexity is O(N) average rather than O(N²). Pairs are counted once
+        (by enforcing i < j) to avoid double-counting.
 
+        Returns:
+            (n_overlapping_pairs, n_total_pairs_checked)
+        """
+        particles = self._particles
+        n_overlapping = 0
+        checked: set[tuple[int, int]] = set()
 
-def _make_spheroid(
-    center: np.ndarray,
-    a: float,
-    c: float,
-    R: np.ndarray,
-) -> OblateSpheroid:
-    """Construct an OblateSpheroid with pre-computed A_inv."""
-    D = np.diag([1.0 / a**2, 1.0 / a**2, 1.0 / c**2])
-    A_inv = np.linalg.inv(R @ D @ R.T)
-    return OblateSpheroid(center=center, a=a, c=c, R=R, A_inv=A_inv)
+        for i, p in enumerate(particles):
+            for j in self._neighbors(p):
+                if j == i:
+                    continue
+                key = (min(i, j), max(i, j))
+                if key in checked:
+                    continue
+                checked.add(key)
+                if _spheroids_overlap(p, particles[j], self.domain):
+                    n_overlapping += 1
 
-
-def _spheroids_overlap(
-    p1: OblateSpheroid,
-    p2: OblateSpheroid,
-    domain: DomainGeometry,
-) -> bool:
-    """
-    Test overlap between two oblate spheroids using the
-    Perram-Wertheim (1985) separating hyperplane criterion.
-
-    Two spheroids do NOT overlap iff there exists s ∈ [0,1] such that:
-        F(s) = s(1-s) d·M(s)⁻¹·d > 1
-    where M(s) = (1-s)A⁻¹ + s B⁻¹  and  d = center_2 - center_1.
-
-    Step 1 (fast reject): bounding sphere check.
-        If |d| > a1 + a2, cannot possibly overlap.
-    Step 2 (exact test): maximize F(s) over [0,1].
-        If max F < 1 → overlap. Else → no overlap.
-
-    Periodic boundary in X, Y handled via minimum-image displacement.
-    """
-    # Fast bounding sphere rejection (uses MIC displacement for periodicity)
-    d = domain.min_image_vector(p1.center, p2.center)
-    dist = float(np.linalg.norm(d))
-    if dist > (p1.bounding_radius + p2.bounding_radius):
-        return False
-
-    # Exact Perram-Wertheim test
-    A_inv = p1.A_inv
-    B_inv = p2.A_inv
-
-    def neg_F(s: float) -> float:
-        M_inv = (1.0 - s) * A_inv + s * B_inv
-        M = np.linalg.inv(M_inv)
-        return -(s * (1.0 - s) * float(d @ M @ d))
-
-    result = minimize_scalar(
-        neg_F, bounds=(0.0, 1.0), method="bounded", options={"xatol": 1e-6}
-    )
-    F_max = -result.fun
-    return F_max < 1.0
-
-
-def _sample_size(
-    d50_nm: float,
-    size_cv: float,
-    rng: np.random.Generator,
-    aspect_ratio: float = 5.0,
-) -> tuple[float, float]:
-    """
-    Draw one (a, c) pair from the log-normal PSD.
-
-    The aspect ratio is fixed per the config — only the overall size
-    (d50) varies between particles, not their flatness.
-
-        d  ~ LogNormal(median=d50, cv=size_cv)
-        a  = d / 2
-        c  = a / aspect_ratio
-    """
-    sigma_ln = math.sqrt(math.log(1.0 + size_cv**2))
-    mu_ln = math.log(d50_nm)
-    d = float(rng.lognormal(mu_ln, sigma_ln))
-    a = d / 2.0
-    c = a / aspect_ratio
-    return a, c
-
-
-def _sample_rotation(kappa: float, rng: np.random.Generator) -> np.ndarray:
-    """
-    Sample a 3×3 rotation matrix R such that the c-axis (R[:, 2])
-    is drawn from vMF(μ=[0,0,1], κ).
-
-    κ = 0     → isotropic (random orientation)
-    κ = large → c-axis closely aligned with Z
-
-    The two basal axes (R[:, 0], R[:, 1]) are chosen to form a
-    right-handed orthonormal frame with the sampled c-axis.
-    """
-    c_axis = _sample_vmf_z(kappa, rng)
-
-    # Build orthonormal frame: Gram-Schmidt with a random transverse vector
-    v = rng.normal(size=3)
-    v -= v.dot(c_axis) * c_axis
-    norm_v = float(np.linalg.norm(v))
-    if norm_v < 1e-10:
-        # c_axis nearly parallel to v — use a fixed fallback
-        v = np.array([1.0, 0.0, 0.0])
-        v -= v.dot(c_axis) * c_axis
-        norm_v = float(np.linalg.norm(v))
-    e1 = v / norm_v
-    e2 = np.cross(c_axis, e1)
-
-    R = np.column_stack([e1, e2, c_axis])
-    return R
-
-
-def _sample_vmf_z(kappa: float, rng: np.random.Generator) -> np.ndarray:
-    """
-    Sample one unit vector from vMF(μ=[0,0,1], κ) using Wood (1994).
-
-    Returns:
-        Unit vector np.ndarray of shape (3,).
-    """
-    if kappa < 1e-6:
-        # Uniform on sphere — Muller method
-        u = rng.normal(size=3)
-        return u / np.linalg.norm(u)
-
-    # Wood (1994) algorithm
-    dim = 3
-    b = (-2.0 * kappa + math.sqrt(4.0 * kappa**2 + (dim - 1) ** 2)) / (dim - 1)
-    x0 = (1.0 - b) / (1.0 + b)
-    c = kappa * x0 + (dim - 1) * math.log(1.0 - x0**2)
-
-    while True:
-        z = float(rng.beta((dim - 1) / 2.0, (dim - 1) / 2.0))
-        w = (1.0 - (1.0 + b) * z) / (1.0 - (1.0 - b) * z)
-        u = float(rng.uniform())
-        if kappa * w + (dim - 1) * math.log(max(1.0 - x0 * w, 1e-300)) - c >= math.log(
-            u
-        ):
-            break
-
-    phi = float(rng.uniform(0.0, 2.0 * math.pi))
-    sin_theta = math.sqrt(max(0.0, 1.0 - w**2))
-    return np.array([sin_theta * math.cos(phi), sin_theta * math.sin(phi), w])
-
-
-def _od_to_kappa(orientation_degree: float) -> float:
-    """
-    Map orientation_degree ∈ [0, 1] to vMF concentration κ ≥ 0.
-
-    Mapping: κ = -10 × ln(1 - orientation_degree)
-    od=0.0  → κ=0     (isotropic — uniform sphere)
-    od=0.60 → κ≈9.2   (strong Z preference)
-    od=0.95 → κ≈30.0  (near-perfect alignment)
-    od=1.0  → κ=∞     (clamped to 1000 — effectively perfect)
-
-    The clamp at κ=1000 means od=0.99999 and od=1.0 are numerically
-    identical. RunConfig.validate_orientation_degree_clamp() warns the
-    user at config-load time when od >= 1.0 or od > 0.95.
-
-    Calibrated so that mean|cos θ| matches the qualitative
-    orientation_degree label (0=random, 1=perfect).
-    """
-    if orientation_degree <= 0.0:
-        return 0.0
-    if orientation_degree >= 1.0:
-        return 1000.0
-    kappa = -10.0 * math.log(1.0 - orientation_degree)
-    return min(kappa, 1000.0)
+        return n_overlapping, len(checked)
 
 
 # ---------------------------------------------------------------------------
 # Public factory function
 # ---------------------------------------------------------------------------
-
-
 def pack_carbon_scaffold(
     comp: CompositionState,
     domain: DomainGeometry,
@@ -568,6 +361,5 @@ def pack_carbon_scaffold(
         comp=comp,
         domain=domain,
         orientation_degree=sim.carbon.orientation_degree,
-        orientation_enhancement=sim.calendering_orientation_enhancement,
     )
     return packer.pack(rng)

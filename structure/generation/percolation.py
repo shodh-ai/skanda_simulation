@@ -21,126 +21,27 @@ A component "percolates" iff it touches both Z=0 and Z=nz-1 face.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Set, List
 
+from typing import List
 import numpy as np
-from scipy.ndimage import label as scipy_label
 
-from structure.schema.resolved import ResolvedSimulation
-
-from .composition import CompositionState
-from .domain import DomainGeometry
-from .si_mapper import SiMapResult
-from .cbd_binder import CBDBinderResult
-from .sei import SEIResult
-from ..phases import PHASE_GRAPHITE
-from ._percolation_utils import run_percolation
-
-
-# ---------------------------------------------------------------------------
-# Custom exception
-# ---------------------------------------------------------------------------
-
-
-class PercolationFailed(Exception):
-    """
-    Raised when the electronic percolation fraction is below min_threshold.
-    Caller should catch this, increment seed, and regenerate from Step 2.
-
-    Attributes:
-      run_id  : run identifier from sim.run_id
-      seed    : the seed that produced this failure
-      fraction: the percolation fraction that was measured
-      threshold: the required minimum
-    """
-
-    def __init__(
-        self,
-        run_id: int,
-        seed: int,
-        fraction: float,
-        threshold: float,
-    ) -> None:
-        self.run_id = run_id
-        self.seed = seed
-        self.fraction = fraction
-        self.threshold = threshold
-        super().__init__(
-            f"Run {run_id} seed={seed}: electronic percolation fraction "
-            f"{fraction:.4f} < threshold {threshold:.4f}. Retry with new seed."
-        )
-
-
-# ---------------------------------------------------------------------------
-# Output dataclass
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class PercolationResult:
-    """
-    Full percolation diagnostics for one microstructure.
-
-    electronic_percolating   : True if elec. network percolates Z=0→Z=nz-1
-    electronic_fraction      : fraction of solid in percolating components
-    electronic_n_components  : total number of distinct solid components
-    electronic_n_percolating : number of components that span Z
-
-    ionic_percolating         : True if pore space percolates Z=0→Z=nz-1
-    ionic_fraction            : fraction of pore in percolating pore components
-    ionic_n_components        : total pore components
-    actual_porosity           : measured pore fraction in this volume
-    warnings                  : list of warning strings
-    """
-
-    # Electronic (conductive) network
-    electronic_percolating: bool
-    electronic_fraction: float
-    electronic_n_components: int
-    electronic_n_percolating: int
-
-    # Ionic (pore) network
-    ionic_percolating: bool
-    ionic_fraction: float
-    ionic_n_components: int
-
-    # Global
-    actual_porosity: float
-    min_threshold: float
-    warnings: List[str] = field(default_factory=list)
-
-    def summary(self) -> str:
-        e_ok = "✓  PASS" if self.electronic_percolating else "✗  FAIL"
-        i_ok = "✓  PASS" if self.ionic_percolating else "✗  FAIL"
-        lines = [
-            "=" * 62,
-            "  PERCOLATION VALIDATOR",
-            "=" * 62,
-            f"  Electronic network  [{e_ok}]",
-            f"    percolating frac : {self.electronic_fraction:.4f}"
-            f"  (threshold ≥ {self.min_threshold:.2f})",
-            f"    components       : {self.electronic_n_components:,}"
-            f"  ({self.electronic_n_percolating} span Z)",
-            "",
-            f"  Ionic (pore) path   [{i_ok}]",
-            f"    percolating frac : {self.ionic_fraction:.4f}",
-            f"    pore components  : {self.ionic_n_components:,}",
-            "",
-            f"  Actual porosity    : {self.actual_porosity:.4f}",
-        ]
-        if self.warnings:
-            lines += ["", f"  ⚠  {len(self.warnings)} WARNING(s):"]
-            lines += [f"     [{i+1}] {w}" for i, w in enumerate(self.warnings)]
-        lines.append("=" * 62)
-        return "\n".join(lines)
+from structure.schema import ResolvedSimulation
+from structure.utils.percolation import run_percolation
+from structure.phases import PHASE_GRAPHITE
+from structure.data import (
+    CompositionState,
+    DomainGeometry,
+    SiMapResult,
+    CBDBinderResult,
+    SEIResult,
+    PercolationFailed,
+    PercolationResult,
+)
 
 
 # ---------------------------------------------------------------------------
 # PercolationValidator
 # ---------------------------------------------------------------------------
-
-
 class PercolationValidator:
     """
     Validates both electronic and ionic percolation of a microstructure.
@@ -205,7 +106,7 @@ class PercolationValidator:
         # ------------------------------------------------------------------
         # Ionic percolation
         # ------------------------------------------------------------------
-        i_frac, i_n_comp, _, ionic_perc = run_percolation(pore_mask)
+        i_frac, i_n_comp, i_n_perc, ionic_perc = run_percolation(pore_mask)
 
         # ------------------------------------------------------------------
         # Warnings
@@ -222,7 +123,15 @@ class PercolationValidator:
         if e_n_perc > 1:
             warns.append(
                 f"Multiple percolating electronic components ({e_n_perc}). "
-                f"Network is connected but fragmented — consider increasing CBD."
+                f"Network is fragmented into multiple spanning paths"
+            )
+
+        if i_n_perc > 1:
+            warns.append(
+                f"Multiple percolating ionic components ({i_n_perc}). "
+                f"Pore space is connected but fragmented across Z — "
+                f"electrolyte may not access all regions uniformly. "
+                f"Consider increasing target_porosity."
             )
 
         if abs(actual_porosity - self.comp.porosity) > 0.05:
@@ -240,6 +149,7 @@ class PercolationValidator:
             ionic_percolating=ionic_perc,
             ionic_fraction=i_frac,
             ionic_n_components=i_n_comp,
+            ionic_n_percolating=i_n_perc,
             actual_porosity=actual_porosity,
             min_threshold=sim.percolation_min_threshold,
             warnings=warns,

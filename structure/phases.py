@@ -11,7 +11,7 @@ at the start of any visualization or voxelization step.
 
 from __future__ import annotations
 
-from structure.schema.resolved import ResolvedSimulation
+from structure.schema import ResolvedSimulation
 
 # ---------------------------------------------------------------------------
 # Phase IDs (uint8 — stable, never reorder)
@@ -73,12 +73,11 @@ def build_phase_colors(
     Returns:
       dict[phase_id → (r, g, b)] with floats in [0, 1]
     """
-    colors: dict[int, tuple[float, float, float]] = {}
+    colors: dict[int, tuple[float, float, float]] = {
+        PHASE_PORE: (0.92, 0.92, 0.96),
+        PHASE_GRAPHITE: _rgb_list_to_float(sim.carbon.material.vis_color_rgb),
+    }
 
-    # Pore — no material, fixed neutral background
-    colors[PHASE_PORE] = (0.92, 0.92, 0.96)
-    # Graphite
-    colors[PHASE_GRAPHITE] = _rgb_list_to_float(sim.carbon.material.vis_color_rgb)
     # Silicon
     colors[PHASE_SI] = _rgb_list_to_float(sim.silicon.vis_color_rgb)
     # Coating (carbon_coating or siox_coating)
@@ -101,8 +100,6 @@ def build_phase_colors_hex(sim: ResolvedSimulation) -> dict[int, str]:
 
     Returns dict[phase_id → '#RRGGBB']
     """
-    hex_colors: dict[int, str] = {}
-
     _material_map = {
         PHASE_PORE: lambda: "#EBEBF5",
         PHASE_GRAPHITE: lambda: sim.carbon.material.vis_color_hex,
@@ -113,7 +110,7 @@ def build_phase_colors_hex(sim: ResolvedSimulation) -> dict[int, str]:
         PHASE_SEI: lambda: sim.sei_material.vis_color_hex,
     }
 
-    for phase_id in PHASE_NAMES:
-        hex_colors[phase_id] = _material_map[phase_id]()
-
+    hex_colors: dict[int, str] = {
+        phase_id: _material_map[phase_id]() for phase_id in PHASE_NAMES
+    }
     return hex_colors

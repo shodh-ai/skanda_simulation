@@ -28,78 +28,19 @@ a gap, not an electrolyte-filled region that would form SEI.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import List
-
 import numpy as np
+from typing import List
 from scipy.ndimage import gaussian_filter, convolve
 
-from structure.schema.resolved import ResolvedSimulation
-
-from .composition import CompositionState
-from .domain import DomainGeometry
-from .si_mapper import SiMapResult
-from ..phases import PHASE_GRAPHITE, PHASE_SEI
-
-
-# ---------------------------------------------------------------------------
-# Output
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class SEIResult:
-    sei_vf: np.ndarray  # float32 (nx,ny,nz) — local SEI vf
-    V_sei_nm3: float  # total SEI volume placed
-    surface_area_nm2: float  # estimated solid–pore interface area
-    mean_thickness_nm: float  # effective mean thickness (V / surface_area)
-    warnings: List[str] = field(default_factory=list)
-
-    def summary(self) -> str:
-        lines = [
-            "=" * 62,
-            "  SEI SHELL",
-            "=" * 62,
-            f"  SEI voxels > 0    : {(self.sei_vf > 0).sum():,}",
-            f"  V_SEI             : {self.V_sei_nm3:.4e} nm³",
-            f"  Surface area      : {self.surface_area_nm2:.4e} nm²",
-            f"  Effective thickness: {self.mean_thickness_nm:.2f} nm",
-            f"  sei_vf max        : {self.sei_vf.max():.5f}",
-            (
-                f"  sei_vf mean (>0)  : {self.sei_vf[self.sei_vf>0].mean():.5f}"
-                if self.sei_vf.any()
-                else "  sei_vf mean (>0)  : N/A"
-            ),
-        ]
-        if self.warnings:
-            lines += ["", f"  ⚠  {len(self.warnings)} WARNING(s):"]
-            lines += [f"     [{i+1}] {w}" for i, w in enumerate(self.warnings)]
-        lines.append("=" * 62)
-        return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# 6-face kernel (module-level constant)
-# ---------------------------------------------------------------------------
-# Counts how many of a solid voxel's 6 face-neighbors are pore.
-# Convolved against the solid mask:
-#   result[x,y,z] = number of 6-connected pore neighbors at (x,y,z)
-_FACE_KERNEL = np.zeros((3, 3, 3), dtype=np.int8)
-_FACE_KERNEL[1, 1, 0] = 1  # -Z
-_FACE_KERNEL[1, 1, 2] = 1  # +Z
-_FACE_KERNEL[1, 0, 1] = 1  # -Y
-_FACE_KERNEL[1, 2, 1] = 1  # +Y
-_FACE_KERNEL[0, 1, 1] = 1  # -X
-_FACE_KERNEL[2, 1, 1] = 1  # +X
+from structure.schema import ResolvedSimulation
+from structure.data import CompositionState, DomainGeometry, SEIResult, SiMapResult
+from structure.phases import PHASE_GRAPHITE
 
 
 # ---------------------------------------------------------------------------
 # SEIShellAdder
 # ---------------------------------------------------------------------------
-
-
 class SEIShellAdder:
-
     def __init__(
         self,
         comp: CompositionState,
@@ -150,23 +91,11 @@ class SEIShellAdder:
         solid_mask = carbon_mask | si_mask
         pore_mask = ~solid_mask
 
-        # ------------------------------------------------------------------
-        # 2. Count exposed faces per solid voxel
-        # ------------------------------------------------------------------
-        # X and Y are periodic — pad with wrap, convolve only Z-faces with constant.
-        # Split the 6-face kernel into XY faces and Z faces separately so we can
-        # apply the correct boundary condition per axis.
-
-        _FACE_KERNEL_XY = np.zeros((3, 3, 3), dtype=np.int8)
-        _FACE_KERNEL_XY[1, 0, 1] = 1  # -Y
-        _FACE_KERNEL_XY[1, 2, 1] = 1  # +Y
+        _FACE_KERNEL_XY = self._extracted_from_add_46(0, 1, 2, 1)
         _FACE_KERNEL_XY[0, 1, 1] = 1  # -X
         _FACE_KERNEL_XY[2, 1, 1] = 1  # +X
 
-        _FACE_KERNEL_Z = np.zeros((3, 3, 3), dtype=np.int8)
-        _FACE_KERNEL_Z[1, 1, 0] = 1  # -Z
-        _FACE_KERNEL_Z[1, 1, 2] = 1  # +Z
-
+        _FACE_KERNEL_Z = self._extracted_from_add_46(1, 0, 1, 2)
         pore_int = pore_mask.astype(np.int16)
         exposed_faces_xy = convolve(
             pore_int, _FACE_KERNEL_XY.astype(np.int16), mode="wrap"
@@ -207,9 +136,13 @@ class SEIShellAdder:
         #    don't push sei_vf > 1.
         # ------------------------------------------------------------------
         if unif_cv > 1e-4:
+            sigma_vox = max(
+                0.5,
+                sim.sei_correlation_length_nm / domain.voxel_size_nm,
+            )
             # Correlated Gaussian field with sigma = 2 voxels (≈ 781nm, sub-particle)
             Z_raw = rng.normal(size=carbon_label.shape).astype(np.float32)
-            Z_corr = gaussian_filter(Z_raw, sigma=2.0)
+            Z_corr = gaussian_filter(Z_raw, sigma=sigma_vox)
             # Standardize to unit variance
             Z_corr /= Z_corr.std() + 1e-9
             # Thickness multiplier: 1 + cv × Z, clipped to [0, 3]
@@ -249,16 +182,27 @@ class SEIShellAdder:
             warnings=warns,
         )
 
+    def _extracted_from_add_46(self, arg0, arg1, arg2, arg3):
+        # ------------------------------------------------------------------
+        # 2. Count exposed faces per solid voxel
+        # ------------------------------------------------------------------
+        # X and Y are periodic — pad with wrap, convolve only Z-faces with constant.
+        # Split the 6-face kernel into XY faces and Z faces separately so we can
+        # apply the correct boundary condition per axis.
+
+        result = np.zeros((3, 3, 3), dtype=np.int8)
+        result[1, arg0, arg1] = 1
+        result[1, arg2, arg3] = 1
+        return result
+
 
 # ---------------------------------------------------------------------------
 # Public factory
 # ---------------------------------------------------------------------------
-
-
 def add_sei_shell(
     comp: CompositionState,
     domain: DomainGeometry,
-    sim,
+    sim: ResolvedSimulation,
     carbon_label: np.ndarray,
     si_result: SiMapResult,
     rng: np.random.Generator,

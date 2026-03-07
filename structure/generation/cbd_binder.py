@@ -19,72 +19,28 @@ Inputs:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Tuple, List
-
 import numpy as np
 from scipy.ndimage import (
     gaussian_filter,
     distance_transform_edt,
-    generate_binary_structure,
     convolve,
 )
 
-from structure.schema.resolved import ResolvedSimulation
-
-
-from .composition import CompositionState
-from .domain import DomainGeometry
-from .si_mapper import SiMapResult
-from ..phases import PHASE_PORE, PHASE_GRAPHITE
-from ._percolation_utils import check_percolates_z
-
-
-# ---------------------------------------------------------------------------
-# Output dataclass
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class CBDBinderResult:
-    cbd_vf: np.ndarray  # float32 (nx,ny,nz)
-    binder_vf: np.ndarray  # float32 (nx,ny,nz)
-    V_cbd_nm3: float
-    V_binder_nm3: float
-    V_cbd_target_nm3: float
-    V_binder_target_nm3: float
-    cbd_mass_error_pct: float
-    binder_mass_error_pct: float
-    cbd_percolating: bool
-    warnings: List[str] = field(default_factory=list)
-
-    def summary(self) -> str:
-        lines = [
-            "=" * 62,
-            "  CBD + BINDER FILL",
-            "=" * 62,
-            f"  CBD volume   : {self.V_cbd_nm3:.4e} nm³  "
-            f"(target {self.V_cbd_target_nm3:.4e} nm³, "
-            f"err={self.cbd_mass_error_pct:.3f}%)",
-            f"  Binder volume: {self.V_binder_nm3:.4e} nm³  "
-            f"(target {self.V_binder_target_nm3:.4e} nm³, "
-            f"err={self.binder_mass_error_pct:.3f}%)",
-            f"  CBD percolates in 3D: {self.cbd_percolating}",
-            f"  CBD voxels>0       : {(self.cbd_vf>0).sum():,}",
-            f"  Binder voxels>0    : {(self.binder_vf>0).sum():,}",
-        ]
-        if self.warnings:
-            lines += ["", f"  ⚠  {len(self.warnings)} WARNING(s):"]
-            lines += [f"     [{i+1}] {w}" for i, w in enumerate(self.warnings)]
-        lines.append("=" * 62)
-        return "\n".join(lines)
+from structure.schema import ResolvedSimulation
+from structure.data import (
+    CBDBinderResult,
+    CompositionState,
+    DomainGeometry,
+    SiMapResult,
+)
+from structure.phases import PHASE_PORE, PHASE_GRAPHITE
+from structure.utils.percolation import check_percolates_z
 
 
 # ---------------------------------------------------------------------------
 # Main mapper
 # ---------------------------------------------------------------------------
-
-
 class CBDBinderMapper:
     """
     Step 4 implementation. Uses GRF + distance weighting for CBD,
@@ -184,10 +140,16 @@ class CBDBinderMapper:
         pore_mask = carbon_label == PHASE_PORE
         carbon_mask = carbon_label == PHASE_GRAPHITE
         si_mask = si_result.si_vf > 1e-3
-        void_mask = si_result.void_mask
+        # Only treat void zones as available CBD space if void was actually computed.
+        # If void_enabled=False, si_result.void_mask is an empty sentinel — using it
+        # as a region mask is correct (empty contributes nothing) but the intent
+        # should be explicit.
+        void_mask = si_result.void_mask if si_result.void_enabled else None
 
         # CBD possible region: not carbon, not void-only; prefer near carbon/Si
-        base_region = pore_mask | si_mask | void_mask
+        base_region = pore_mask | si_mask
+        if void_mask is not None:
+            base_region = base_region | void_mask
 
         if sim.additive_distribution == "aggregate":
             # more clumpy: restrict to pore-only region
@@ -201,12 +163,26 @@ class CBDBinderMapper:
             )
 
         # Correlation length in voxels from aggregate size
-        agg_nm = getattr(sim.additive, "primary_particle_nm", 40.0)
+        agg_nm = sim.additive.primary_particle_nm
         corr_len = max(0.5, agg_nm / domain.voxel_size_nm)  # ≥ 0.5 voxels
 
         warnings = []
         percolates = False
         cbd_vf = np.zeros((nx, ny, nz), dtype=np.float32)
+        cbd_vf_candidate = np.zeros((nx, ny, nz), dtype=np.float32)
+
+        # Precompute distance transform once — carbon_mask is fixed across all retries.
+        # distance_transform_edt is O(nx×ny×nz); moving it outside saves
+        # (MAX_CBD_RETRIES - 1) redundant calls.
+        dist_to_carbon = distance_transform_edt(~carbon_mask)  # 0 at carbon surface
+        # Precompute the bias weights for base_region too — base_region is also
+        # fixed across retries (depends only on carbon_mask, si_mask, void_mask).
+        _d = dist_to_carbon[base_region]
+        if _d.size > 0:
+            _d_norm = _d / (_d.max() + 1e-9)
+            _bias = np.exp(-_d_norm * 2.0)  # shape: (n_base_region_voxels,)
+        else:
+            _bias = None
 
         for attempt in range(self.MAX_CBD_RETRIES):
             # 1. GRF on full domain
@@ -214,13 +190,8 @@ class CBDBinderMapper:
             field = gaussian_filter(noise, sigma=corr_len)
 
             # 2. Bias toward carbon surfaces: closer to carbon → higher weight
-            dist_to_carbon = distance_transform_edt(~carbon_mask)  # 0 at carbon
-            # Scale to [0, 1] within base_region
-            d = dist_to_carbon[base_region]
-            if d.size > 0:
-                d_norm = d / (d.max() + 1e-9)
-                bias = np.exp(-d_norm * 2.0)  # exp decay away from carbon
-                field[base_region] *= 0.5 + bias  # 0.5–1.5 multiplier
+            if _bias is not None:
+                field[base_region] *= 0.5 + _bias
 
             # 3. Clip to base_region, zero elsewhere, positive only
             field[~base_region] = -np.inf  # exclude impossible voxels
@@ -265,10 +236,17 @@ class CBDBinderMapper:
             )
 
         if not percolates:
-            warnings.append(
-                f"CBD GRF: failed to produce percolating network after "
-                f"{self.MAX_CBD_RETRIES} attempts. Using last realization."
-            )
+            if cbd_vf_candidate.any():
+                warnings.append(
+                    f"CBD GRF: failed to produce percolating network after "
+                    f"{self.MAX_CBD_RETRIES} attempts. Using last realization."
+                )
+            else:
+                warnings.append(
+                    f"CBD GRF: all {self.MAX_CBD_RETRIES} attempts produced zero "
+                    f"volume (V_current <= 0.0 after smoothing). "
+                    f"CBD field is empty. Check base_region and GRF sigma."
+                )
             cbd_vf = cbd_vf_candidate
 
         return cbd_vf, warnings, percolates
@@ -298,66 +276,79 @@ class CBDBinderMapper:
         carbon_mask = carbon_label == PHASE_GRAPHITE
         pore_mask = carbon_label == PHASE_PORE
 
-        # Contact voxels = carbon voxels with ≥2 carbon neighbors
-        struct = generate_binary_structure(3, 1)  # 6-connectivity
-        carbon_neighbors = convolve(
-            carbon_mask.astype(np.int16),
-            struct.astype(np.int16),
-            mode="constant",
-            cval=0,
-        )
-        # subtract self-count to get true neighbors
-        carbon_neighbors = carbon_neighbors - carbon_mask.astype(np.int16)
-        contact_mask = carbon_mask & (carbon_neighbors >= 2)
+        dist_from_carbon = distance_transform_edt(~carbon_mask)  # 0 at carbon surface
+        near_carbon_pore = pore_mask & (dist_from_carbon <= 1.5)
 
-        if not contact_mask.any():
-            return np.zeros_like(binder_vf), [
-                "No carbon contacts detected — binder 'necks' cannot be formed."
+        if not near_carbon_pore.any():
+            return np.zeros((nx, ny, nz), dtype=np.float32), [
+                "No near-carbon pore region found — binder cannot be placed. "
+                "Check carbon packing and porosity target."
             ]
 
-        # Distribution mode
-        dist = sim.binder_distribution
+        dist = getattr(sim, "binder_distribution", "necks")
 
-        if dist == "uniform":
-            # Simple: binder follows carbon volume
-            binder_vf[carbon_mask] = 1.0
-        elif dist == "patchy":
-            # Binder blobs — GRF restricted to carbon+near-pore
-            base = carbon_mask | (distance_transform_edt(~carbon_mask) <= 1.5)
+        if dist == "patchy":
+            # Binder blobs restricted to near-carbon pore space only.
+            # Previously used carbon_mask | (dist <= 1.5) which included carbon interior.
             field = gaussian_filter(
                 rng.normal(size=(nx, ny, nz)).astype(np.float32),
                 sigma=1.0,
             )
-            field[~base] = -np.inf
+            field[~near_carbon_pore] = -np.inf
             flat = field.ravel()
             idx = flat.argsort()[::-1]
-            n_target = int(np.ceil(V_target / V_voxel))
-            n_target = min(n_target, flat.size)
+            n_target = min(
+                int(np.ceil(V_target / V_voxel)), int(near_carbon_pore.sum())
+            )
             vf = np.zeros_like(flat, dtype=np.float32)
             vf[idx[:n_target]] = 1.0
             binder_vf = vf.reshape(nx, ny, nz)
-        else:  # "necks"
-            # 1. Start at contact voxels
-            binder_vf[contact_mask] = 1.0
 
-            # 2. Spread into neighboring pore region with Gaussian kernel
-            # scale in voxels from binder film thickness
-            t_nm = sim.binder.film_thickness_max_nm
-            sigma_vox = max(0.5, t_nm / domain.voxel_size_nm)  # ~0.04 → clamp 0.5
+        elif dist == "uniform":
+            # Binder distributed uniformly over all near-carbon pore voxels.
+            # Previously incorrectly set binder_vf[carbon_mask] = 1.0 (inside carbon).
+            binder_vf[near_carbon_pore] = 1.0
+
+        else:
+            _KERNEL_XY = self._extracted_from__make_binder_vf_57(0, 1, 2, 1)
+            _KERNEL_XY[1, 0, 1] = 1  # -Y
+            _KERNEL_XY[1, 2, 1] = 1  # +Y
+
+            _KERNEL_Z = self._extracted_from__make_binder_vf_57(1, 0, 1, 2)
+            carbon_int = carbon_mask.astype(np.int16)
+            carbon_neighbors_xy = convolve(carbon_int, _KERNEL_XY, mode="wrap")
+            carbon_neighbors_z = convolve(
+                carbon_int, _KERNEL_Z, mode="constant", cval=0
+            )
+            # Total carbon neighbors excluding self
+            carbon_neighbors = (
+                carbon_neighbors_xy + carbon_neighbors_z - carbon_mask.astype(np.int16)
+            )
+            contact_mask = carbon_mask & (carbon_neighbors >= 2)
+
+            if not contact_mask.any():
+                return np.zeros_like(binder_vf), [
+                    "No carbon contacts detected — binder 'necks' cannot be formed."
+                ]
+
+            # Seed at contact voxels, spread into pore with Gaussian kernel
+            binder_vf[contact_mask] = 1.0
+            t_nm = getattr(sim, "binder_film_thickness_nm", 15.0)
+            sigma_vox = max(0.5, t_nm / domain.voxel_size_nm)
             binder_vf = gaussian_filter(binder_vf, sigma=sigma_vox)
 
-            # Allow binder only in carbon + immediate pore vicinity
-            mask_near_carbon = distance_transform_edt(~carbon_mask) <= 1.5
-            binder_vf[~mask_near_carbon] = 0.0
+            # Clip to near-carbon pore only — removes any spread back into carbon
+            binder_vf[~near_carbon_pore] = 0.0
 
         # Normalize to volume target
+        warnings: list[str] = []
         V_current = float(binder_vf.sum() * V_voxel)
-        warnings: List[str] = []
         if V_current <= 0.0:
             warnings.append(
-                "Binder vf is zero after initial placement — using uniform distribution on carbon."
+                "Binder vf is zero after placement — falling back to uniform "
+                "distribution over near-carbon pore region."
             )
-            binder_vf[carbon_mask] = 1.0
+            binder_vf[near_carbon_pore] = 1.0
             V_current = float(binder_vf.sum() * V_voxel)
 
         scale = V_target / V_current
@@ -365,6 +356,13 @@ class CBDBinderMapper:
         binder_vf = np.clip(binder_vf, 0.0, 1.0)
 
         return binder_vf, warnings
+
+    def _extracted_from__make_binder_vf_57(self, arg0, arg1, arg2, arg3):
+        # Contact voxels = carbon voxels with ≥2 carbon neighbors
+        result = np.zeros((3, 3, 3), dtype=np.int16)
+        result[arg0, 1, arg1] = 1
+        result[arg2, 1, arg3] = 1
+        return result
 
 
 # ---------------------------------------------------------------------------
