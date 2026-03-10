@@ -1,12 +1,12 @@
 """
-Combines a validated RunConfig + MaterialsDB into a single resolved object.
+Combines a validated GenConfig + MaterialsDB into a single resolved object.
 This is the ONLY object the generator ever reads — it never touches raw YAML.
 """
 
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
-from .config import RunConfig
+from .gen_config import GenConfig
 from .materials import (
     MaterialsDB,
     GraphiteMaterial,
@@ -74,7 +74,7 @@ class ResolvedComposition:
 
 
 @dataclass
-class ResolvedSimulation:
+class ResolvedGeneration:
     """Single resolved object handed to the generator."""
 
     run_id: int
@@ -116,9 +116,9 @@ class ResolvedSimulation:
     defects_pore_clustering_degree: float
 
 
-def resolve(cfg: RunConfig, db: MaterialsDB) -> ResolvedSimulation:
+def resolve_generation(cfg: GenConfig, db: MaterialsDB) -> ResolvedGeneration:
     """
-    Merge RunConfig + MaterialsDB into one flat ResolvedSimulation.
+    Merge GenConfig + MaterialsDB into one flat ResolvedGeneration.
     This is the entry point used by the generator.
     """
     si_db: SiBaseMaterial = db.si_base
@@ -197,7 +197,7 @@ def resolve(cfg: RunConfig, db: MaterialsDB) -> ResolvedSimulation:
                 stacklevel=2,
             )
 
-    return ResolvedSimulation(
+    return ResolvedGeneration(
         run_id=cfg.run_id,
         seed=cfg.seed,
         voxel_resolution=cfg.voxel_resolution,

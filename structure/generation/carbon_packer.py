@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import math
 import numpy as np
-from structure.schema import ResolvedSimulation
+from structure.schema import ResolvedGeneration
 from structure.data import (
     CompositionState,
     DomainGeometry,
@@ -342,7 +342,7 @@ class CarbonScaffoldPacker:
 def pack_carbon_scaffold(
     comp: CompositionState,
     domain: DomainGeometry,
-    sim: ResolvedSimulation,
+    sim: ResolvedGeneration,
     rng: np.random.Generator,
 ) -> PackingResult:
     """
@@ -351,7 +351,7 @@ def pack_carbon_scaffold(
     Args:
         comp   : CompositionState from Step 0
         domain : DomainGeometry from Step 1
-        sim    : ResolvedSimulation (for orientation params)
+        sim    : ResolvedGeneration (for orientation params)
         rng    : seeded Generator (seed comes from run_config)
 
     Returns:

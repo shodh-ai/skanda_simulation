@@ -25,7 +25,7 @@ from __future__ import annotations
 from typing import List
 import numpy as np
 
-from structure.schema import ResolvedSimulation
+from structure.schema import ResolvedGeneration
 from structure.utils.percolation import run_percolation
 from structure.phases import PHASE_GRAPHITE
 from structure.data import (
@@ -61,7 +61,7 @@ class PercolationValidator:
         self,
         comp: CompositionState,
         domain: DomainGeometry,
-        sim: ResolvedSimulation,
+        sim: ResolvedGeneration,
     ) -> None:
         self.comp = comp
         self.domain = domain
@@ -189,7 +189,7 @@ def validate_percolation(
     Args:
       comp         : CompositionState (Step 0)
       domain       : DomainGeometry (Step 1)
-      sim          : ResolvedSimulation
+      sim          : ResolvedGeneration
       carbon_label : uint8 label map post-calendering (Step 2)
       si_result    : SiMapResult post-calendering (Step 3)
       cbd_result   : CBDBinderResult (Step 4)

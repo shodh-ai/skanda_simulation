@@ -11,7 +11,7 @@ at the start of any visualization or voxelization step.
 
 from __future__ import annotations
 
-from structure.schema import ResolvedSimulation
+from structure.schema import ResolvedGeneration
 
 # ---------------------------------------------------------------------------
 # Phase IDs (uint8 — stable, never reorder)
@@ -46,6 +46,33 @@ PHASE_NAMES: dict[int, str] = {
     PHASE_SEI: "SEI",
 }
 
+# Grayscale lookup for TIFF export — modelled after backscattered electron
+# (BSE) SEM contrast where brightness ∝ mean atomic number (Z̄).
+#
+# Physical ordering (low Z̄ → dark, high Z̄ → bright):
+#   Pore      : 0   — no material, no signal
+#   SEI       : 30  — Li₂CO₃/Li₂O, very low Z̄
+#   Graphite  : 55  — pure carbon (Z=6)
+#   CBD       : 70  — carbon black (Z=6, slightly thicker signal than graphite)
+#   Binder    : 90  — PVDF (C/H/F mix, Z̄ ≈ 8)
+#   Coating   : 120 — SiOₓ or C coating (Z̄ between C and Si)
+#   Silicon   : 200 — Si (Z=14), clearly brightest solid phase
+#
+# Values are spaced > 25 grey levels apart so phases are visually separable
+# at 8-bit depth and survive mild JPEG-style compression artefacts.
+PHASE_GRAYSCALE: dict[int, int] = {
+    PHASE_PORE: 0,
+    PHASE_SEI: 30,
+    PHASE_GRAPHITE: 55,
+    PHASE_CBD: 70,
+    PHASE_BINDER: 90,
+    PHASE_COATING: 120,
+    PHASE_SI: 200,
+}
+
+# Reverse map: grayscale value → phase ID (used by load_tiff)
+_GRAYSCALE_TO_PHASE: dict[int, int] = {v: k for k, v in PHASE_GRAYSCALE.items()}
+
 
 def _rgb_list_to_float(rgb: list[int]) -> tuple[float, float, float]:
     """Convert [R, G, B] in 0-255 range to (r, g, b) in 0.0-1.0 range."""
@@ -53,7 +80,7 @@ def _rgb_list_to_float(rgb: list[int]) -> tuple[float, float, float]:
 
 
 def build_phase_colors(
-    sim: ResolvedSimulation,
+    sim: ResolvedGeneration,
 ) -> dict[int, tuple[float, float, float]]:
     """
     Build the phase → float RGB color map from the actual resolved materials.
@@ -68,7 +95,7 @@ def build_phase_colors(
       PHASE_PORE     : fixed neutral (no material assigned to pore)
 
     Args:
-      sim : ResolvedSimulation
+      sim : ResolvedGeneration
 
     Returns:
       dict[phase_id → (r, g, b)] with floats in [0, 1]
@@ -94,7 +121,7 @@ def build_phase_colors(
     return colors
 
 
-def build_phase_colors_hex(sim: ResolvedSimulation) -> dict[int, str]:
+def build_phase_colors_hex(sim: ResolvedGeneration) -> dict[int, str]:
     """
     Same as build_phase_colors but returns hex strings
 

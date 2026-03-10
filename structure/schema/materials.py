@@ -5,8 +5,8 @@ Validates all 15 material entries and exposes typed accessors.
 
 from __future__ import annotations
 import math
-from typing import Optional
-from pydantic import BaseModel, Field, field_validator
+from typing import Optional, List
+from pydantic import BaseModel, Field
 import yaml
 from pathlib import Path
 
@@ -164,6 +164,126 @@ class CurrentCollectorMaterial(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Cathode active materials
+# ---------------------------------------------------------------------------
+
+
+class CathodeMaterial(BaseModel):
+    family: str
+    formula: str
+    description: str
+
+    # Physical
+    density_g_cm3: float = Field(..., gt=0)
+    molar_mass_g_mol: float = Field(..., gt=0)
+    theoretical_capacity_mAh_g: float = Field(..., gt=0)
+    practical_capacity_mAh_g: Optional[float] = None  # LCO only
+    max_concentration_mol_m3: float = Field(..., gt=0)
+
+    # Stoichiometry window
+    stoichiometry_charged: float = Field(..., ge=0.0, le=1.0)
+    stoichiometry_discharged: float = Field(..., ge=0.0, le=1.0)
+
+    # Electrochemical
+    li_diffusivity_m2_s: float = Field(..., gt=0)
+    electrical_conductivity_S_m: float = Field(..., gt=0)
+    exchange_current_density_A_m2: float = Field(..., gt=0)
+    charge_transfer_coefficient: float = Field(..., ge=0.0, le=1.0)
+
+    # Voltage window
+    voltage_min_V: float = Field(..., gt=0)
+    voltage_max_V: float = Field(..., gt=0)
+
+    # OCV curve reference key (resolves to file under materialdb/ocv_curves/)
+    ocv_curve: str
+
+    # Degradation
+    capacity_fade_mechanism: str
+    cycle_life_typical_cycles: int = Field(..., gt=0)
+
+    vis_color_hex: str
+    vis_color_rgb: list[int]
+
+    @property
+    def capacity_mAh_g(self) -> float:
+        """Practical capacity if available, else theoretical."""
+        return self.practical_capacity_mAh_g or self.theoretical_capacity_mAh_g
+
+
+# ---------------------------------------------------------------------------
+# Electrolytes
+# ---------------------------------------------------------------------------
+
+
+class ElectrolyteMaterial(BaseModel):
+    family: str
+    aliases: list[str] = Field(default_factory=list)
+    description: str
+
+    # Formulation
+    solvent: dict[str, float]  # e.g. {"EC": 0.50, "DMC": 0.50}
+    salt: str
+    salt_concentration_mol_L: float = Field(..., gt=0)
+
+    # Bulk transport at 298.15 K (Valoen & Reimers 2005 unless noted)
+    ionic_conductivity_S_m: float = Field(..., gt=0)
+    li_diffusivity_m2_s: float = Field(..., gt=0)
+    transference_number: float = Field(..., ge=0.0, le=1.0)
+    thermodynamic_factor: float = Field(..., gt=0)
+
+    # Physical
+    density_g_cm3: float = Field(..., gt=0)
+    viscosity_mPas: float = Field(..., gt=0)
+    dielectric_constant: float = Field(..., gt=0)
+
+    # If true, concentration-dependent expressions are loaded from
+    # materialdb/electrolyte_expressions/ at simulation time
+    concentration_dependent: bool = False
+    temperature_dependent: bool = False
+    expression_key: Optional[str] = None
+
+    electrochemical_window_V: list[float]
+    compatible_anodes: list[str]
+    compatible_cathodes: list[str]
+
+
+# ---------------------------------------------------------------------------
+# Separators
+# ---------------------------------------------------------------------------
+
+
+class SeparatorMaterial(BaseModel):
+    family: str
+    description: str
+    construction: str  # e.g. "trilayer_PP_PE_PP"
+
+    # Geometry
+    thickness_um: float = Field(..., gt=0)
+    porosity: float = Field(..., gt=0, le=1.0)
+    ceramic_layer_thickness_um: Optional[float] = None
+    mean_pore_size_nm: float = Field(..., gt=0)
+    pore_size_distribution: str  # "unimodal" | "bimodal"
+
+    # Transport
+    tortuosity: float = Field(..., ge=1.0)
+    macmullin_number: float = Field(..., ge=1.0)  # = tortuosity / porosity
+    bruggeman_exponent: float = Field(..., gt=0)
+
+    # Mechanical
+    tensile_strength_MD_MPa: float = Field(..., gt=0)
+    tensile_strength_TD_MPa: float = Field(..., gt=0)
+    puncture_strength_gf: float = Field(..., gt=0)
+
+    # Thermal
+    # None for monolayer PP/PE — no shutdown layer present
+    thermal_shutdown_temp_C: Optional[float] = None
+    meltdown_temp_C: float = Field(..., gt=0)
+
+    vis_color_hex: str
+    vis_color_rgb: list[int]
+
+
+# ---------------------------------------------------------------------------
 # Root DB model — typed accessors for every code
 # ---------------------------------------------------------------------------
 
@@ -198,6 +318,31 @@ class MaterialsDB(BaseModel):
     # Current collector
     cu_foil: CurrentCollectorMaterial
 
+    # Cathode active materials
+    nmc811: CathodeMaterial
+    nmc622: CathodeMaterial
+    nmc532: CathodeMaterial
+    nmc111: CathodeMaterial
+    lfp: CathodeMaterial
+    nca: CathodeMaterial
+    lco: CathodeMaterial
+
+    # Electrolytes
+    LiPF6_EC_DMC_1M: ElectrolyteMaterial
+    LiPF6_EC_DEC_1M: ElectrolyteMaterial
+    LiPF6_EC_EMC_3_7_1M: ElectrolyteMaterial
+    LiPF6_FEC_DMC_1M: ElectrolyteMaterial
+    LiFSI_DME_1M: ElectrolyteMaterial
+
+    # Separators
+    Celgard2325: SeparatorMaterial
+    Celgard2500: SeparatorMaterial
+    Celgard3501: SeparatorMaterial
+    ceramic_PP: SeparatorMaterial
+
+    # Cathode current collector
+    al_foil: CurrentCollectorMaterial
+
     def get_graphite(self, carbon_type: str) -> GraphiteMaterial:
         return getattr(self, carbon_type)
 
@@ -209,6 +354,18 @@ class MaterialsDB(BaseModel):
 
     def get_coating(self, coating_type: str) -> CoatingMaterial:
         return getattr(self, coating_type)
+
+    def get_cathode(self, cathode_key: str) -> CathodeMaterial:
+        return getattr(self, cathode_key)
+
+    def get_electrolyte(self, electrolyte_key: str) -> ElectrolyteMaterial:
+        return getattr(self, electrolyte_key)
+
+    def get_separator(self, separator_key: str) -> SeparatorMaterial:
+        return getattr(self, separator_key)
+
+    def get_current_collector(self, cc_key: str) -> CurrentCollectorMaterial:
+        return getattr(self, cc_key)
 
 
 # ---------------------------------------------------------------------------

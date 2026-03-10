@@ -4,3 +4,6 @@ matplotlib
 pandas
 plotly
 scikit-image
+tifffile
+taufactor
+pybamm

@@ -5,7 +5,7 @@ Single entry point:
 
     vol = run(sim)
 
-Takes a ResolvedSimulation, chains all generation steps, handles
+Takes a ResolvedGeneration, chains all generation steps, handles
 PercolationFailed retries, and returns a MicrostructureVolume.
 
 Step dependency map:
@@ -35,7 +35,7 @@ import time
 from typing import Optional
 import numpy as np
 
-from structure.schema import ResolvedSimulation
+from structure.schema import ResolvedGeneration
 from structure.data import (
     CompositionState,
     DomainGeometry,
@@ -73,8 +73,8 @@ from structure.utils import rasterize_carbon
 # ---------------------------------------------------------------------------
 
 
-def run(
-    sim: ResolvedSimulation,
+def run_generation(
+    sim: ResolvedGeneration,
     max_retries: int = 10,
     verbose: bool = True,
 ) -> PipelineResult:
@@ -82,7 +82,7 @@ def run(
     Run the full microstructure generation pipeline.
 
     Args:
-        sim         : ResolvedSimulation — all config + materials resolved.
+        sim         : ResolvedGeneration — all config + materials resolved.
         max_retries : Maximum number of packing+percolation attempts.
                       Each attempt uses seed = sim.seed + attempt_index.
         verbose     : Print per-step progress and summaries if True.

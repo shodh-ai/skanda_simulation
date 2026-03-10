@@ -33,7 +33,7 @@ import numpy as np
 from scipy.ndimage import zoom
 from typing import Iterable, Tuple
 
-from structure.schema import ResolvedSimulation
+from structure.schema import ResolvedGeneration
 from structure.data import (
     DomainGeometry,
     CompositionState,
@@ -294,7 +294,7 @@ def apply_calendering(
     domain: DomainGeometry,
     si_result: SiMapResult,
     cbd_result: CBDBinderResult,
-    sim: ResolvedSimulation,
+    sim: ResolvedGeneration,
 ) -> Tuple[SiMapResult, CBDBinderResult]:
     """
     Canonical entry point for Step 5.
@@ -305,7 +305,7 @@ def apply_calendering(
       domain      : DomainGeometry
       si_result   : SiMapResult (Step 3)
       cbd_result  : CBDBinderResult (Step 4)
-      sim         : ResolvedSimulation (for calendering params)
+      sim         : ResolvedGeneration (for calendering params)
 
     Returns:
       (si_result_out, cbd_result_out)  — currently identical to inputs

@@ -34,8 +34,8 @@ from scipy.ndimage import (
     gaussian_filter,
 )
 
-from structure.schema import ResolvedSimulation
-from structure.schema.config import SiDistribution
+from structure.schema import ResolvedGeneration
+from structure.schema.gen_config import SiDistribution
 from structure.data import SiMapResult, CompositionState, DomainGeometry, PackingResult
 from structure.phases import PHASE_GRAPHITE
 
@@ -58,7 +58,7 @@ class SiVfMapper:
         self,
         comp: CompositionState,
         domain: DomainGeometry,
-        sim: ResolvedSimulation,
+        sim: ResolvedGeneration,
     ) -> None:
         self.comp = comp
         self.domain = domain
@@ -462,7 +462,7 @@ class SiVfMapper:
 def map_si_distribution(
     comp: CompositionState,
     domain: DomainGeometry,
-    sim: ResolvedSimulation,
+    sim: ResolvedGeneration,
     carbon_label: np.ndarray,
     packing: PackingResult,
     rng: np.random.Generator,
@@ -473,7 +473,7 @@ def map_si_distribution(
     Args:
         comp         : CompositionState from Step 0
         domain       : DomainGeometry from Step 1
-        sim          : ResolvedSimulation
+        sim          : ResolvedGeneration
         carbon_label : uint8 label volume from Step 2 voxelizer
         packing      : PackingResult from Step 2 (particle list)
         rng          : seeded Generator (same generator, continues from Step 2)

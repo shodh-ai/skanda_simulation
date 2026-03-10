@@ -16,7 +16,7 @@ Units throughout:
 from __future__ import annotations
 import numpy as np
 from structure.data import CompositionState
-from structure.schema import ResolvedSimulation
+from structure.schema import ResolvedGeneration
 from structure.constants import _NM3_TO_CM3
 from structure.utils.composition import (
     _lognormal_d3_correction,
@@ -27,9 +27,9 @@ from structure.utils.composition import (
 )
 
 
-def compute_composition(sim: ResolvedSimulation) -> CompositionState:
+def compute_composition(sim: ResolvedGeneration) -> CompositionState:
     """
-    Compute the full CompositionState from a ResolvedSimulation.
+    Compute the full CompositionState from a ResolvedGeneration.
 
     This is the only public symbol from this module.
     Call once at the start of the generation pipeline.

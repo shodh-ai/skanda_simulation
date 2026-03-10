@@ -10,6 +10,13 @@ from .PercolationFailed import PercolationFailed
 from .PercolationResult import PercolationResult
 from .MicrostructureVolume import MicrostructureVolume, VolumeMetadata
 from .PipelineResult import PipelineResult
+from .SimulationResults import (
+    SimulationResult,
+    TauFactorResult,
+    RateCapabilityResult,
+    DCIRResult,
+    CycleLifeResult,
+)
 
 __all__ = [
     "CompositionState",
@@ -25,4 +32,9 @@ __all__ = [
     "MicrostructureVolume",
     "VolumeMetadata",
     "PipelineResult",
+    "SimulationResult",
+    "TauFactorResult",
+    "RateCapabilityResult",
+    "DCIRResult",
+    "CycleLifeResult",
 ]

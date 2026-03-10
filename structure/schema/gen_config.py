@@ -158,7 +158,7 @@ class DefectsConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class RunConfig(BaseModel):
+class GenConfig(BaseModel):
 
     # --- Metadata ---
     run_id: int = Field(..., ge=0)
@@ -289,7 +289,7 @@ class RunConfig(BaseModel):
     # -----------------------------------------------------------------------
 
     @model_validator(mode="after")
-    def validate_composition_sum(self) -> RunConfig:
+    def validate_composition_sum(self) -> GenConfig:
         """CA + binder must leave ≥0.80 for active material."""
         non_active = self.conductive_additive_wt_frac + self.binder_wt_frac
         if non_active >= 0.20:
@@ -300,7 +300,7 @@ class RunConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_coating_thickness_vs_coating(self) -> RunConfig:
+    def validate_coating_thickness_vs_coating(self) -> GenConfig:
         """siox_coating range is 2–20 nm, carbon_coating is 5–50 nm."""
         if self.si_coating_enabled:
             t = self.si_coating_thickness_nm
@@ -319,7 +319,7 @@ class RunConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_carbon_d50_vs_type(self) -> RunConfig:
+    def validate_carbon_d50_vs_type(self) -> GenConfig:
         """Warn if d50 is outside the typical range for the chosen carbon type."""
         ranges = {
             CarbonType.GRAPHITE_ARTIFICIAL: (10000.0, 30000.0),
@@ -340,7 +340,7 @@ class RunConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_orientation_degree_clamp(self) -> RunConfig:
+    def validate_orientation_degree_clamp(self) -> GenConfig:
         """Warn if carbon_orientation_degree is close enough to 1.0 to hit the κ clamp."""
         import warnings
 
@@ -366,7 +366,7 @@ class RunConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_si_coating_thickness_vs_particle(self) -> RunConfig:
+    def validate_si_coating_thickness_vs_particle(self) -> GenConfig:
         """Coating thickness must be << particle radius (at most 50% of radius)."""
         if self.si_coating_enabled:
             r = self.si_particle_d50_nm / 2.0
@@ -378,7 +378,7 @@ class RunConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_void_fraction_with_flag(self) -> RunConfig:
+    def validate_void_fraction_with_flag(self) -> GenConfig:
         """Warn if si_void_fraction is set while si_void_enabled is False."""
         import warnings
 
@@ -394,7 +394,7 @@ class RunConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_internal_porosity_with_morphology(self) -> RunConfig:
+    def validate_internal_porosity_with_morphology(self) -> GenConfig:
         """Warn if si_internal_porosity is set while si_morphology != 'porous'."""
         import warnings
 
@@ -413,7 +413,7 @@ class RunConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_coating_params_with_flag(self) -> RunConfig:
+    def validate_coating_params_with_flag(self) -> GenConfig:
         """Warn if coating parameters are set while si_coating_enabled is False."""
         import warnings
 
@@ -428,7 +428,7 @@ class RunConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_core_shell_thickness(self) -> RunConfig:
+    def validate_core_shell_thickness(self) -> GenConfig:
         """
         Warn if si_core_shell_carbon_thickness_nm is set while
         si_distribution != 'core_shell' — value will be silently unused.
@@ -451,7 +451,7 @@ class RunConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_sei_correlation_vs_resolution(self) -> RunConfig:
+    def validate_sei_correlation_vs_resolution(self) -> GenConfig:
         """
         Warn if sei_correlation_length_nm is smaller than one voxel —
         the GRF sigma would be < 1.0 voxels, making it effectively white noise
@@ -491,7 +491,7 @@ class RunConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def load_run_config(path: str | Path) -> RunConfig:
+def load_gen_config(path: str | Path) -> GenConfig:
     """Load and validate a run config YAML. Raises ValidationError on any issue."""
     raw = yaml.safe_load(Path(path).read_text())
-    return RunConfig.model_validate(raw)
+    return GenConfig.model_validate(raw)

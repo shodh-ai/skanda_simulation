@@ -1,0 +1,144 @@
+# =============================================================================
+# SIMULATION CONFIGURATION
+# Si-Graphite Anode Microstructure Simulation Pipeline
+# =============================================================================
+# Philosophy: this file only contains what cannot be derived from either
+# MicrostructureVolume.metadata or MaterialDB. Keep it short.
+#
+# What lives here:    cell assembly choices, cycling conditions, solver settings
+# What lives in DB:   all material properties (density, OCV, diffusivity, etc.)
+# What lives in vol:  anode geometry, porosity, phase fractions, capacity
+# =============================================================================
+
+# =============================================================================
+# CELL
+# Only what isn't in MaterialDB or MicrostructureVolume.
+# =============================================================================
+
+cell:
+  anode:
+    current_collector_thickness_um: 8.0 # range: 6–15 µm
+
+  cathode:
+    material:
+      "NMC811" # materialDB key
+      # options: NMC811, NMC622, NMC532, NMC111, LFP, NCA, LCO
+    thickness_um: 80.0 # range: 30–200 µm
+    porosity: 0.30 # range: 0.20–0.45
+
+  separator:
+    material:
+      "Celgard2325" # materialDB key
+      # options: Celgard2325, Celgard2500, Celgard3501, ceramic_PP
+
+  # Negative-to-positive areal capacity ratio
+  # Range: 1.05–1.20 for Si-Gr (wider buffer than pure Gr)
+  np_ratio: 1.10
+
+  # Geometric electrode area — for normalising areal outputs
+  # Range: 1.0 cm² (coin cell) – 200 cm² (pouch cell)
+  cell_area_cm2: 1.0
+
+# =============================================================================
+# ELECTROLYTE
+# =============================================================================
+
+electrolyte:
+  material:
+    "LiPF6_EC_DMC_1M" # materialDB key
+    # options: LiPF6_EC_DMC_1M  (LP30), LiPF6_EC_DEC_1M  (LP40), LiPF6_EC_EMC_3_7_1M (LP57), LiPF6_FEC_DMC_1M (Si cells), LiFSI_DME_1M
+  temperature_K: 298.15 # range: 233–333 K (−40°C to +60°C)
+
+# =============================================================================
+# CYCLING
+# Three protocols drive all 9 target outputs:
+#   rate_capability  → Nominal Capacity, Energy Density
+#   dcir_pulse       → Initial DCIR
+#   cycle_life       → Projected Cycle Life, Capacity Fade Rate
+# =============================================================================
+
+cycling:
+  voltage_cutoff_low_V: 2.50 # range: 2.0–3.0 V
+  voltage_cutoff_high_V: 4.20 # range: 4.0–4.35 V
+
+  protocols:
+    # Nominal capacity + energy density indicator
+    # Slow discharge at C/5 defines the "nominal" baseline
+    - name: "rate_capability"
+      enabled: true
+      c_rates: [0.2, 0.5, 1.0, 2.0, 5.0] # range per point: 0.05C – 10C
+      charge_c_rate: 0.2
+      rest_time_s: 300 # range: 0–1800 s
+
+    # DCIR — 10-second current pulse at 50% SOC
+    - name: "dcir_pulse"
+      enabled: true
+      soc_point: 0.50 # range: 0.2–0.8
+      pulse_c_rate: 1.0 # range: 0.5–2C
+      pulse_duration_s: 10 # range: 5–30 s
+
+    # Projected cycle life + capacity fade rate
+    - name: "cycle_life"
+      enabled: true
+      charge_c_rate: 0.5 # range: 0.2–1C
+      discharge_c_rate: 1.0 # range: 0.5–2C
+      n_cycles: 200 # range: 50–500
+      end_of_life_retention: 0.80 # stop at 80% initial capacity
+      record_every_n_cycles: 5 # range: 1–20
+
+# =============================================================================
+# TAUFACTOR
+# Drives: Tortuosity Factor, Electrode Porosity,
+#         Effective Diffusivity, Bruggeman Exponent
+# =============================================================================
+
+taufactor:
+  enabled: true
+  # Pore-space (ionic) tortuosity — primary output
+  pore_threshold:
+    0.5 # range: 0.1–0.7
+    # 0.5 = majority-pore voxel
+  # Electronic network tortuosity (carbon + CBD)
+  electronic_threshold: 0.3 # range: 0.1–0.5
+  # Through-plane only — matches current flow direction
+  direction: "z" # "z" | "all"
+
+# =============================================================================
+# PYBAMM
+# =============================================================================
+
+pybamm:
+  enabled: true
+  # DFN needed for DCIR accuracy and cycle life degradation
+  # Use SPMe for faster screening if cycle_life is disabled
+  model: "DFN" # "SPM" | "SPMe" | "DFN"
+  solver: "IDAKLUSolver" # "IDAKLUSolver" | "CasadiSolver"
+  atol: 1.0e-6
+  rtol: 1.0e-6
+  sei_model:
+    "reaction_limited" # "none" | "reaction_limited" | "solvent_diffusion"
+    # needed for cycle life / fade rate
+
+# =============================================================================
+# OUTPUTS
+# Exactly the 9 target datapoints — nothing more.
+# All derived from the three protocols + TauFactor above.
+# =============================================================================
+
+outputs:
+  # From TauFactor
+  tortuosity_factor: true # τ ionic (Z direction)
+  electrode_porosity: true # mean(pore_vf) from MicrostructureVolume
+  effective_diffusivity: true # D_eff = D_bulk × ε / τ  (m²/s)
+  bruggeman_exponent: true # β fit from τ = ε^(1-β)
+
+  # From rate_capability protocol
+  nominal_capacity_mAh_cm2: true # capacity at C/5
+  energy_density_mWh_cm2: true # ∫V·I dt at C/5
+
+  # From dcir_pulse protocol
+  initial_dcir_mOhm_cm2: true # ΔV / ΔI normalised by cell area
+
+  # From cycle_life protocol
+  projected_cycle_life: true # cycle number when capacity < 80%
+  capacity_fade_rate_pct_per_cycle: true # linear fit slope on Q[cycle]

@@ -32,7 +32,7 @@ import numpy as np
 from typing import List
 from scipy.ndimage import gaussian_filter, convolve
 
-from structure.schema import ResolvedSimulation
+from structure.schema import ResolvedGeneration
 from structure.data import CompositionState, DomainGeometry, SEIResult, SiMapResult
 from structure.phases import PHASE_GRAPHITE
 
@@ -45,7 +45,7 @@ class SEIShellAdder:
         self,
         comp: CompositionState,
         domain: DomainGeometry,
-        sim: ResolvedSimulation,
+        sim: ResolvedGeneration,
     ) -> None:
         self.comp = comp
         self.domain = domain
@@ -202,7 +202,7 @@ class SEIShellAdder:
 def add_sei_shell(
     comp: CompositionState,
     domain: DomainGeometry,
-    sim: ResolvedSimulation,
+    sim: ResolvedGeneration,
     carbon_label: np.ndarray,
     si_result: SiMapResult,
     rng: np.random.Generator,
@@ -213,7 +213,7 @@ def add_sei_shell(
     Args:
       comp         : CompositionState (Step 0)
       domain       : DomainGeometry (Step 1)
-      sim          : ResolvedSimulation
+      sim          : ResolvedGeneration
       carbon_label : uint8 label map post-calendering (Step 2)
       si_result    : SiMapResult post-calendering (Step 3)
       rng          : seeded Generator

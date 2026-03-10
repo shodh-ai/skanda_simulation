@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import numpy as np
 import json
+import tifffile
 
 from structure.phases import (
     PHASE_GRAPHITE,
@@ -27,6 +28,8 @@ from structure.phases import (
     PHASE_CBD,
     PHASE_BINDER,
     PHASE_SEI,
+    PHASE_GRAYSCALE,
+    _GRAYSCALE_TO_PHASE,
 )
 
 # ---------------------------------------------------------------------------
@@ -85,6 +88,23 @@ class VolumeMetadata:
     si_coating_enabled: bool
     si_coating_thickness_nm: float
 
+    # ── Carbon electrochemical properties — from GraphiteMaterial in DB ───────
+    carbon_li_diffusivity_m2_s: float
+    carbon_electrical_conductivity_S_m: float
+    carbon_theoretical_capacity_mAh_g: float
+    carbon_density_g_cm3: float
+    carbon_molar_mass_g_mol: float
+
+    # ── Silicon electrochemical properties — computed at si_d50_nm ────────────
+    # D and σ are size-dependent (correlations in SiBaseMaterial).
+    # Intrinsic properties (capacity, density, molar_mass, expansion) are fixed.
+    si_li_diffusivity_m2_s: float
+    si_electrical_conductivity_S_m: float
+    si_theoretical_capacity_mAh_g: float
+    si_density_g_cm3: float
+    si_molar_mass_g_mol: float
+    si_volume_expansion_factor: float
+
 
 # ---------------------------------------------------------------------------
 # MicrostructureVolume
@@ -105,7 +125,7 @@ class MicrostructureVolume:
     cbd_vf: np.ndarray  # float32
     binder_vf: np.ndarray  # float32
     sei_vf: np.ndarray  # float32
-    pore_vf: np.ndarray  # float32 — derived, not independent
+    pore_vf: np.ndarray  # float32
 
     metadata: VolumeMetadata
     warnings: list[str] = field(default_factory=list)
@@ -234,6 +254,27 @@ class MicrostructureVolume:
             meta_si_d50_nm=np.float32(m.si_d50_nm),
             meta_si_coating_enabled=np.bool_(m.si_coating_enabled),
             meta_si_coating_thickness_nm=np.float32(m.si_coating_thickness_nm),
+            # Carbon electrochemical
+            meta_carbon_li_diffusivity_m2_s=np.float32(m.carbon_li_diffusivity_m2_s),
+            meta_carbon_electrical_conductivity_S_m=np.float32(
+                m.carbon_electrical_conductivity_S_m
+            ),
+            meta_carbon_theoretical_capacity_mAh_g=np.float32(
+                m.carbon_theoretical_capacity_mAh_g
+            ),
+            meta_carbon_density_g_cm3=np.float32(m.carbon_density_g_cm3),
+            meta_carbon_molar_mass_g_mol=np.float32(m.carbon_molar_mass_g_mol),
+            # Silicon electrochemical
+            meta_si_li_diffusivity_m2_s=np.float32(m.si_li_diffusivity_m2_s),
+            meta_si_electrical_conductivity_S_m=np.float32(
+                m.si_electrical_conductivity_S_m
+            ),
+            meta_si_theoretical_capacity_mAh_g=np.float32(
+                m.si_theoretical_capacity_mAh_g
+            ),
+            meta_si_density_g_cm3=np.float32(m.si_density_g_cm3),
+            meta_si_molar_mass_g_mol=np.float32(m.si_molar_mass_g_mol),
+            meta_si_volume_expansion_factor=np.float32(m.si_volume_expansion_factor),
             warnings_json=np.bytes_(json.dumps(self.warnings)),
         )
 
@@ -272,6 +313,25 @@ class MicrostructureVolume:
             si_d50_nm=float(d["meta_si_d50_nm"]),
             si_coating_enabled=bool(d["meta_si_coating_enabled"]),
             si_coating_thickness_nm=float(d["meta_si_coating_thickness_nm"]),
+            carbon_li_diffusivity_m2_s=float(d["meta_carbon_li_diffusivity_m2_s"]),
+            carbon_electrical_conductivity_S_m=float(
+                d["meta_carbon_electrical_conductivity_S_m"]
+            ),
+            carbon_theoretical_capacity_mAh_g=float(
+                d["meta_carbon_theoretical_capacity_mAh_g"]
+            ),
+            carbon_density_g_cm3=float(d["meta_carbon_density_g_cm3"]),
+            carbon_molar_mass_g_mol=float(d["meta_carbon_molar_mass_g_mol"]),
+            si_li_diffusivity_m2_s=float(d["meta_si_li_diffusivity_m2_s"]),
+            si_electrical_conductivity_S_m=float(
+                d["meta_si_electrical_conductivity_S_m"]
+            ),
+            si_theoretical_capacity_mAh_g=float(
+                d["meta_si_theoretical_capacity_mAh_g"]
+            ),
+            si_density_g_cm3=float(d["meta_si_density_g_cm3"]),
+            si_molar_mass_g_mol=float(d["meta_si_molar_mass_g_mol"]),
+            si_volume_expansion_factor=float(d["meta_si_volume_expansion_factor"]),
         )
         warnings = json.loads(d["warnings_json"].item().decode("utf-8"))
 
@@ -286,6 +346,116 @@ class MicrostructureVolume:
             metadata=meta,
             warnings=warnings,
         )
+
+    # ── TIFF export / import ──────────────────────────────────────────────────
+    def save_tiff(self, path: str | Path) -> None:
+        """
+        Save the microstructure as a grayscale TIFF Z-stack.
+
+        Format mirrors a BSE-SEM image stack:
+        - dtype  : uint8
+        - shape  : (nz, ny, nx) — Z-slices as pages, standard microscopy
+                    convention (depth-first, same as ImageJ / Fiji / Dragonfly)
+        - values : grayscale intensities from PHASE_GRAYSCALE, ordered by
+                    mean atomic number so brightness ∝ Z̄ (BSE-SEM convention)
+
+        The dominant phase per voxel is determined by dominant_phase_map()
+        (same priority logic as the old VoxelGrid label_map). Float VF
+        fields are NOT recoverable from the TIFF — use save() / load() for
+        full-fidelity round-trips.
+
+        ImageJ metadata is embedded so the stack opens correctly with
+        voxel_size_nm written as the spatial calibration.
+
+        Args:
+            path : output path, e.g. "output/microstructure.tiff"
+
+        Raises:
+            ImportError if tifffile is not installed.
+        """
+
+        label_map = self.dominant_phase_map()
+        nx, ny, nz = label_map.shape
+
+        # Build grayscale LUT: phase_id → uint8 grey value
+        # Max phase ID is 6 (PHASE_SEI) — LUT size = 7
+        lut = np.zeros(7, dtype=np.uint8)
+        for phase_id, grey in PHASE_GRAYSCALE.items():
+            lut[phase_id] = np.uint8(grey)
+
+        # Apply LUT: label_map values are phase IDs (0–6)
+        grey_map = lut[label_map]  # uint8 (nx, ny, nz)
+
+        # Reorder to (nz, ny, nx) — standard TIFF/microscopy Z-stack convention
+        grey_stack = np.transpose(grey_map, (2, 1, 0))  # (nz, ny, nx)
+
+        vs_um = self.metadata.voxel_size_nm / 1000.0
+
+        # ImageJ metadata: spatial calibration so Fiji reads voxel size correctly
+        imagej_metadata = {
+            "unit": "um",
+            "spacing": vs_um,  # Z spacing
+        }
+
+        tifffile.imwrite(
+            str(path),
+            grey_stack,
+            imagej=True,
+            resolution=(1.0 / vs_um, 1.0 / vs_um),  # XY pixels per µm
+            metadata=imagej_metadata,
+            compression="zlib",  # lossless, ~2–4× smaller than uncompressed
+            photometric="minisblack",
+        )
+
+    @staticmethod
+    def load_tiff(path: str | Path) -> np.ndarray:
+        """
+        Load a grayscale TIFF Z-stack saved by save_tiff().
+
+        Reverses the grayscale → phase ID mapping using nearest-neighbour
+        lookup against PHASE_GRAYSCALE values. Returns a uint8 label array
+        in the standard (nx, ny, nz) axis convention used by all other
+        methods in this class.
+
+        Note:
+            Float VF fields (carbon_vf, si_vf, etc.) cannot be recovered
+            from a TIFF — this returns only the dominant-phase label map.
+            For full round-trip fidelity, use MicrostructureVolume.load().
+
+        Args:
+            path : path to a .tiff file saved by save_tiff()
+
+        Returns:
+            uint8 (nx, ny, nz) dominant-phase label array with PHASE_* values.
+
+        Raises:
+            ImportError if tifffile is not installed.
+            ValueError  if the TIFF contains grayscale values not in
+                        PHASE_GRAYSCALE (i.e., not generated by save_tiff).
+        """
+
+        grey_stack = tifffile.imread(str(path))  # (nz, ny, nx) uint8
+
+        # Validate: all values must be known grayscale levels
+        unique_vals = set(np.unique(grey_stack).tolist())
+        known_vals = set(_GRAYSCALE_TO_PHASE.keys())
+        if unknown := unique_vals - known_vals:
+            raise ValueError(
+                f"TIFF contains grayscale values not in PHASE_GRAYSCALE: "
+                f"{sorted(unknown)}. "
+                f"Expected values: {sorted(known_vals)}. "
+                f"This TIFF was not generated by MicrostructureVolume.save_tiff()."
+            )
+
+        # Build reverse LUT: grey value → phase ID
+        # Grey values go up to 255; only 7 are valid (0,30,55,70,90,120,200)
+        reverse_lut = np.zeros(256, dtype=np.uint8)
+        for grey, phase_id in _GRAYSCALE_TO_PHASE.items():
+            reverse_lut[grey] = np.uint8(phase_id)
+
+        label_stack = reverse_lut[grey_stack]  # (nz, ny, nx) uint8 phase IDs
+
+        return np.transpose(label_stack, (2, 1, 0))
 
     # ── Summary ───────────────────────────────────────────────────────────
 

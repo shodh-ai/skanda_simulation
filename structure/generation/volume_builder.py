@@ -10,7 +10,7 @@ from structure.data import (
     SiMapResult,
     VolumeMetadata,
 )
-from structure.schema import ResolvedSimulation
+from structure.schema import ResolvedGeneration
 from structure.phases import PHASE_GRAPHITE
 
 
@@ -107,7 +107,7 @@ def _validate_volume(
 def assemble_volume(
     comp: CompositionState,
     domain: DomainGeometry,
-    sim: ResolvedSimulation,
+    sim: ResolvedGeneration,
     packing: PackingResult,
     carbon_label: np.ndarray,
     si_result: SiMapResult,
@@ -128,7 +128,7 @@ def assemble_volume(
     Args:
         comp         : CompositionState (Step 0)
         domain       : DomainGeometry   (Step 1)
-        sim          : ResolvedSimulation
+        sim          : ResolvedGeneration
         packing      : PackingResult    (Step 2)
         carbon_label : uint8 intermediate label map (from test.py rasterizer)
         si_result    : SiMapResult post-calendering  (Steps 3/5)
@@ -188,6 +188,17 @@ def assemble_volume(
         si_d50_nm=comp.si_d50_nm,
         si_coating_enabled=sim.silicon.coating_enabled,
         si_coating_thickness_nm=sim.silicon.coating_thickness_nm,
+        carbon_li_diffusivity_m2_s=sim.carbon.material.li_diffusivity_m2_s,
+        carbon_electrical_conductivity_S_m=sim.carbon.material.electrical_conductivity_S_m,
+        carbon_theoretical_capacity_mAh_g=sim.carbon.material.theoretical_capacity_mAh_g,
+        carbon_density_g_cm3=sim.carbon.material.density_g_cm3,
+        carbon_molar_mass_g_mol=sim.carbon.material.molar_mass_g_mol,
+        si_li_diffusivity_m2_s=sim.silicon.li_diffusivity_m2_s,
+        si_electrical_conductivity_S_m=sim.silicon.electrical_conductivity_S_m,
+        si_theoretical_capacity_mAh_g=sim.silicon.theoretical_capacity_mAh_g,
+        si_density_g_cm3=sim.silicon.density_g_cm3,
+        si_molar_mass_g_mol=sim.silicon.molar_mass_g_mol,
+        si_volume_expansion_factor=sim.silicon.volume_expansion_factor,
     )
 
     warns = _validate_volume(

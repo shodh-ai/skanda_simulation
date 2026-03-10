@@ -12,7 +12,7 @@ Binder is concentrated at carbon contact "necks" and smeared spatially.
 Inputs:
   - CompositionState (V_CA, V_B targets, etc.)
   - DomainGeometry
-  - ResolvedSimulation (distribution modes)
+  - ResolvedGeneration (distribution modes)
   - carbon_label (0=pore, 1=graphite)
   - si_result (SiMapResult: si_vf, void_mask)
 """
@@ -27,7 +27,7 @@ from scipy.ndimage import (
     convolve,
 )
 
-from structure.schema import ResolvedSimulation
+from structure.schema import ResolvedGeneration
 from structure.data import (
     CBDBinderResult,
     CompositionState,
@@ -50,7 +50,7 @@ class CBDBinderMapper:
     MAX_CBD_RETRIES: int = 5
 
     def __init__(
-        self, comp: CompositionState, domain: DomainGeometry, sim: ResolvedSimulation
+        self, comp: CompositionState, domain: DomainGeometry, sim: ResolvedGeneration
     ) -> None:
         self.comp = comp
         self.domain = domain
@@ -373,7 +373,7 @@ class CBDBinderMapper:
 def fill_cbd_binder(
     comp: CompositionState,
     domain: DomainGeometry,
-    sim: ResolvedSimulation,
+    sim: ResolvedGeneration,
     carbon_label: np.ndarray,
     si_result: SiMapResult,
     rng: np.random.Generator,
@@ -384,7 +384,7 @@ def fill_cbd_binder(
     Args:
       comp         : CompositionState (Step 0)
       domain       : DomainGeometry (Step 1)
-      sim          : ResolvedSimulation
+      sim          : ResolvedGeneration
       carbon_label : uint8 label map (Step 2)
       si_result    : SiMapResult (Step 3)
       rng          : seeded Generator

@@ -286,3 +286,542 @@ cu_foil:
   molar_mass_g_mol: 63.55
   vis_color_hex: "#B87333" # copper
   vis_color_rgb: [184, 115, 51]
+
+# =============================================================================
+# CATHODE ACTIVE MATERIALS
+# =============================================================================
+# Units: density_g_cm3, molar_mass_g_mol, theoretical_capacity_mAh_g
+#        li_diffusivity_m2_s  (solid-phase Li diffusion at 25°C, mean SOC)
+#        electrical_conductivity_S_m  (intrinsic crystal, before electrode porosity)
+#        exchange_current_density_A_m2  (i0 at c_e_ref=1000 mol/m³, c_s=c_s_max/2)
+#        max_concentration_mol_m3  (c_s_max, crystal density / molar mass)
+#
+# Stoichiometry convention (x in Li_x MO2):
+#   stoichiometry_charged  = x at full charge (4.2V cutoff, delithiated)
+#   stoichiometry_discharged = x at full discharge (2.5V cutoff, lithiated)
+#
+# OCV curve keys resolve to data files under materialdb/ocv_curves/<key>.csv
+# Columns in each file: stoichiometry (0–1), voltage_V
+# Source citations embedded per material.
+# =============================================================================
+
+nmc811:
+  family: "cathode"
+  formula: "LiNi0.8Mn0.1Co0.1O2"
+  description:
+    "High-energy Ni-rich layered oxide. Best energy density of NMC family
+    but sensitive to structural degradation above 4.2V and thermal runaway."
+
+  # Physical
+  density_g_cm3: 4.72 # crystal density; range 4.65–4.78
+  molar_mass_g_mol: 97.28 # Li(1)+Ni(0.8×58.69)+Mn(0.1×54.94)+Co(0.1×58.93)+O(2×16)
+  theoretical_capacity_mAh_g: 200.0 # practical to 4.2V: ~190–200 mAh/g
+  max_concentration_mol_m3: 51765.0 # = 1000 × density / molar_mass (mol/m³); Xu2019
+
+  # Stoichiometry window (to 4.2V / 2.5V)
+  stoichiometry_charged: 0.27 # x at 4.2V; range 0.22–0.33
+  stoichiometry_discharged: 0.96 # x at 2.5V; range 0.92–0.98
+
+  # Electrochemical (25°C, 1M LiPF6)
+  li_diffusivity_m2_s: 3.0e-14 # range: 1e-14 – 1e-13; SOC-dependent, mean value
+  electrical_conductivity_S_m: 0.50 # range: 0.1–1.0 S/m; intrinsic layered oxide
+  exchange_current_density_A_m2: 4.0 # range: 2.0–6.0 A/m²
+  charge_transfer_coefficient: 0.5 # symmetric Butler-Volmer
+
+  # Nominal operating window
+  voltage_min_V: 2.50
+  voltage_max_V: 4.20 # conservative; 4.3V used in some high-energy cells
+
+  # OCV curve reference (Chen2020 / Xu2019 combined fit)
+  ocv_curve: "nmc811_Xu2019"
+
+  # Degradation characteristics (qualitative, for simulation model selection)
+  capacity_fade_mechanism: "structural_disordering_and_crack"
+  cycle_life_typical_cycles: 500 # to 80% at 1C, 25°C
+
+  vis_color_hex: "#4169E1" # royal blue
+  vis_color_rgb: [65, 105, 225]
+
+nmc622:
+  family: "cathode"
+  formula: "LiNi0.6Mn0.2Co0.2O2"
+  description: "Mid-range Ni-rich NMC. Better thermal stability than NMC811
+    with slightly lower energy density. Common in EV first-generation cells."
+
+  density_g_cm3: 4.70
+  molar_mass_g_mol: 96.93
+  theoretical_capacity_mAh_g: 175.0 # practical to 4.2V: ~165–175 mAh/g
+  max_concentration_mol_m3: 49600.0
+
+  stoichiometry_charged: 0.30
+  stoichiometry_discharged: 0.95
+
+  li_diffusivity_m2_s: 1.0e-14 # range: 5e-15 – 5e-14
+  electrical_conductivity_S_m: 0.30
+  exchange_current_density_A_m2: 3.0
+  charge_transfer_coefficient: 0.5
+
+  voltage_min_V: 2.50
+  voltage_max_V: 4.20
+
+  ocv_curve: "nmc622_Ecker2015"
+
+  capacity_fade_mechanism: "structural_disordering"
+  cycle_life_typical_cycles: 700
+
+  vis_color_hex: "#1E90FF" # dodger blue
+  vis_color_rgb: [30, 144, 255]
+
+nmc532:
+  family: "cathode"
+  formula: "LiNi0.5Mn0.3Co0.2O2"
+  description: "Balanced NMC. Good balance of energy, power, and stability.
+    Lower Ni than 622 means better abuse tolerance."
+
+  density_g_cm3: 4.65
+  molar_mass_g_mol: 96.55
+  theoretical_capacity_mAh_g: 160.0 # practical: ~150–165 mAh/g
+  max_concentration_mol_m3: 48300.0
+
+  stoichiometry_charged: 0.39
+  stoichiometry_discharged: 0.85
+
+  li_diffusivity_m2_s: 5.0e-15
+  electrical_conductivity_S_m: 0.20
+  exchange_current_density_A_m2: 2.5
+  charge_transfer_coefficient: 0.5
+
+  voltage_min_V: 2.50
+  voltage_max_V: 4.20
+
+  ocv_curve: "nmc532_generic"
+
+  capacity_fade_mechanism: "structural_disordering"
+  cycle_life_typical_cycles: 900
+
+  vis_color_hex: "#6495ED" # cornflower blue
+  vis_color_rgb: [100, 149, 237]
+
+nmc111:
+  family: "cathode"
+  formula: "LiNi0.33Mn0.33Co0.33O2"
+  description: "Classic balanced NMC. Lowest energy density of the NMC family
+    but excellent thermal stability and cycle life. Good reference material."
+
+  density_g_cm3: 4.65
+  molar_mass_g_mol: 96.46
+  theoretical_capacity_mAh_g: 155.0 # practical: ~145–160 mAh/g
+  max_concentration_mol_m3: 49000.0 # Chen2020 standard parameter set
+
+  stoichiometry_charged: 0.44 # Dahn1996 / Chen2020
+  stoichiometry_discharged: 0.86
+
+  li_diffusivity_m2_s: 1.0e-14 # range: 3e-15 – 3e-14
+  electrical_conductivity_S_m: 0.10
+  exchange_current_density_A_m2: 2.0
+  charge_transfer_coefficient: 0.5
+
+  voltage_min_V: 2.50
+  voltage_max_V: 4.20
+
+  ocv_curve: "nmc111_Chen2020" # Chen2020 polynomial fit, widely used in PyBaMM
+
+  capacity_fade_mechanism: "electrolyte_oxidation"
+  cycle_life_typical_cycles: 1500
+
+  vis_color_hex: "#87CEEB" # sky blue
+  vis_color_rgb: [135, 206, 235]
+
+lfp:
+  family: "cathode"
+  formula: "LiFePO4"
+  description:
+    "Iron phosphate cathode. Flat ~3.4V plateau, exceptional cycle life,
+    best thermal safety. Low energy density. Dominant in LFP/Gr cells."
+
+  density_g_cm3: 3.60
+  molar_mass_g_mol: 157.76 # Li(6.94)+Fe(55.85)+P(30.97)+O4(63.99)
+  theoretical_capacity_mAh_g: 170.0 # practical to 3.65V: ~155–165 mAh/g
+  max_concentration_mol_m3: 22806.0 # standard PyBaMM LFP value (Prada2013)
+
+  stoichiometry_charged: 0.02 # nearly fully delithiated
+  stoichiometry_discharged: 0.98 # nearly fully lithiated
+
+  # LFP is intrinsically electronically insulating — requires carbon coating.
+  # Conductivity here is effective for a carbon-coated LFP particle.
+  li_diffusivity_m2_s: 5.0e-18 # range: 1e-18 – 1e-16; notoriously slow
+  electrical_conductivity_S_m: 1.0e-4 # bare LFP ~ 1e-9; carbon-coated ~ 1e-4–1e-2
+  exchange_current_density_A_m2: 1.0 # range: 0.5–3.0 A/m²; biphasic kinetics
+  charge_transfer_coefficient: 0.5
+
+  voltage_min_V: 2.00
+  voltage_max_V: 3.65
+
+  ocv_curve: "lfp_Prada2013" # flat plateau — needs fine interpolation
+
+  capacity_fade_mechanism: "fe_dissolution_and_li_plating_at_low_T"
+  cycle_life_typical_cycles: 3000
+
+  vis_color_hex: "#228B22" # forest green
+  vis_color_rgb: [34, 139, 34]
+
+nca:
+  family: "cathode"
+  formula: "LiNi0.8Co0.15Al0.05O2"
+  description:
+    "High-energy Ni-rich with Al stabilisation. Similar energy density
+    to NMC811. Common in cylindrical cells (Panasonic/Tesla). Good rate capability."
+
+  density_g_cm3: 4.70
+  molar_mass_g_mol: 96.08 # Li+0.8Ni+0.15Co+0.05Al+2O
+  theoretical_capacity_mAh_g: 200.0 # practical to 4.2V: ~185–200 mAh/g
+  max_concentration_mol_m3: 49000.0
+
+  stoichiometry_charged: 0.27
+  stoichiometry_discharged: 0.96
+
+  li_diffusivity_m2_s: 2.0e-14 # range: 1e-14 – 1e-13
+  electrical_conductivity_S_m: 0.50
+  exchange_current_density_A_m2: 3.5
+  charge_transfer_coefficient: 0.5
+
+  voltage_min_V: 2.50
+  voltage_max_V: 4.20
+
+  ocv_curve: "nca_Schmalstieg2018"
+
+  capacity_fade_mechanism: "ni_dissolution_and_structural_instability"
+  cycle_life_typical_cycles: 600
+
+  vis_color_hex: "#4682B4" # steel blue
+  vis_color_rgb: [70, 130, 180]
+
+lco:
+  family: "cathode"
+  formula: "LiCoO2"
+  description: "Layered cobalt oxide. Original Li-ion cathode (Sony 1991).
+    High volumetric energy density. Used in consumer electronics.
+    Limited to x > 0.5 to avoid structural collapse."
+
+  density_g_cm3: 5.05
+  molar_mass_g_mol: 97.87 # Li(6.94)+Co(58.93)+O2(32.00)
+  theoretical_capacity_mAh_g: 274.0 # theoretical; practical ~150–160 mAh/g to 4.2V
+  practical_capacity_mAh_g: 155.0 # stored separately for capacity calculations
+  max_concentration_mol_m3: 51555.0
+
+  stoichiometry_charged: 0.50 # x=0.5 is the stability limit for LCO
+  stoichiometry_discharged: 0.98
+
+  li_diffusivity_m2_s: 5.0e-14 # range: 1e-14 – 1e-13; fast for layered oxide
+  electrical_conductivity_S_m: 10.0 # range: 1–100 S/m; most conductive cathode
+  exchange_current_density_A_m2: 5.0
+  charge_transfer_coefficient: 0.5
+
+  voltage_min_V: 3.00
+  voltage_max_V: 4.20
+
+  ocv_curve: "lco_Doyle1996"
+
+  capacity_fade_mechanism: "co_dissolution_and_oxygen_release"
+  cycle_life_typical_cycles: 400
+
+  vis_color_hex: "#9370DB" # medium purple
+  vis_color_rgb: [147, 112, 219]
+
+# =============================================================================
+# ELECTROLYTES
+# =============================================================================
+# All transport properties are at reference conditions: T=298.15K, c=1.0 mol/L
+# unless noted otherwise.
+#
+# Fields used by simulation pipeline:
+#   ionic_conductivity_S_m  → TauFactor D_eff denominator + PyBaMM bulk κ
+#   li_diffusivity_m2_s     → TauFactor D_eff = D_bulk × ε/τ
+#   transference_number     → PyBaMM t+ (Hittorf convention, not NMR-based)
+#   thermodynamic_factor    → 1 + d(lnf±)/d(lnc), used in concentrated theory
+#
+# concentration_dependent: true → DB supplies polynomial expression strings
+#   (loaded and eval'd by the simulation adapter, not stored in this file)
+#   expression files under materialdb/electrolyte_expressions/<key>_kappa.py etc.
+# =============================================================================
+
+LiPF6_EC_DMC_1M:
+  family: "electrolyte"
+  aliases: ["LP30"]
+  description: "1M LiPF6 in EC:DMC 1:1 by volume. The most widely studied
+    Li-ion electrolyte. Stable SEI on graphite. Moderate conductivity."
+
+  solvent: { EC: 0.50, DMC: 0.50 } # volume fractions
+  salt: "LiPF6"
+  salt_concentration_mol_L: 1.0
+
+  # Bulk transport at 298.15 K, 1.0 mol/L (Valoen & Reimers 2005)
+  ionic_conductivity_S_m: 1.00 # range: 0.85–1.10 S/m; 10.0 mS/cm
+  li_diffusivity_m2_s: 2.80e-10 # range: 2.0e-10 – 3.5e-10 m²/s
+  transference_number: 0.38 # range: 0.36–0.40 (Hittorf method)
+  thermodynamic_factor: 1.00 # ~1.0 near 1M (dilute limit approximation)
+
+  # Physical
+  density_g_cm3: 1.21
+  viscosity_mPas: 3.20 # range: 2.5–4.0 mPas at 25°C
+  dielectric_constant: 38.0 # EC-dominated
+
+  # Temperature and concentration dependence available
+  concentration_dependent: true
+  temperature_dependent: true
+  expression_key: "LiPF6_EC_DMC_Valoen2005" # resolves to expression file
+
+  electrochemical_window_V: [0.0, 4.5] # stable vs Li/Li+
+  compatible_anodes: ["graphite", "silicon", "si_graphite"]
+  compatible_cathodes:
+    ["NMC811", "NMC622", "NMC532", "NMC111", "NCA", "LCO", "LFP"]
+
+LiPF6_EC_DEC_1M:
+  family: "electrolyte"
+  aliases: ["LP40"]
+  description: "1M LiPF6 in EC:DEC 1:1 by volume. Higher viscosity than LP30
+    reduces conductivity slightly. Better low-temperature performance."
+
+  solvent: { EC: 0.50, DEC: 0.50 }
+  salt: "LiPF6"
+  salt_concentration_mol_L: 1.0
+
+  ionic_conductivity_S_m: 0.90 # range: 0.75–1.00 S/m
+  li_diffusivity_m2_s: 2.40e-10 # slightly lower than LP30 (DEC more viscous)
+  transference_number: 0.37
+  thermodynamic_factor: 1.00
+
+  density_g_cm3: 1.20
+  viscosity_mPas: 4.30 # range: 3.5–5.5 mPas
+  dielectric_constant: 19
+
+  concentration_dependent: true
+  temperature_dependent: true
+  expression_key: "LiPF6_EC_DEC_Valoen2005"
+
+  electrochemical_window_V: [0.0, 4.5]
+  compatible_anodes: ["graphite", "silicon", "si_graphite"]
+  compatible_cathodes:
+    ["NMC811", "NMC622", "NMC532", "NMC111", "NCA", "LCO", "LFP"]
+
+LiPF6_EC_EMC_3_7_1M:
+  family: "electrolyte"
+  aliases: ["LP57", "Gen2"]
+  description: "1M LiPF6 in EC:EMC 3:7 by weight. Automotive industry standard
+    (Argonne Gen2). High conductivity, wide liquid range, good cycle life."
+
+  solvent: { EC: 0.30, EMC: 0.70 } # weight fractions (3:7 by weight)
+  salt: "LiPF6"
+  salt_concentration_mol_L: 1.0
+
+  ionic_conductivity_S_m: 1.00 # ~10 mS/cm at 25°C; comparable to LP30
+  li_diffusivity_m2_s: 3.00e-10 # EMC lower viscosity improves diffusivity
+  transference_number: 0.38
+  thermodynamic_factor: 1.00
+
+  density_g_cm3: 1.17
+  viscosity_mPas: 2.90 # lower than LP30 due to EMC
+  dielectric_constant: 18.5
+
+  concentration_dependent: true
+  temperature_dependent: true
+  expression_key: "LiPF6_EC_EMC_Nyman2008" # Nyman et al. 2008 (widely cited)
+
+  electrochemical_window_V: [0.0, 4.5]
+  compatible_anodes: ["graphite", "silicon", "si_graphite"]
+  compatible_cathodes:
+    ["NMC811", "NMC622", "NMC532", "NMC111", "NCA", "LCO", "LFP"]
+
+LiPF6_FEC_DMC_1M:
+  family: "electrolyte"
+  aliases: ["FEC_electrolyte", "Si_optimised"]
+  description: "1M LiPF6 in FEC:DMC 1:4 by volume. FEC additive forms a more
+    stable, thinner SEI on Si anodes. Preferred for high-Si-content electrodes
+    (Si > 15 wt%). Conductivity lower than LP30 due to FEC viscosity."
+  solvent: { FEC: 0.20, DMC: 0.80 }
+  salt: "LiPF6"
+  salt_concentration_mol_L: 1.0
+
+  ionic_conductivity_S_m: 0.85 # range: 0.70–0.95 S/m
+  li_diffusivity_m2_s: 2.20e-10
+  transference_number: 0.37 # FEC slightly lowers t+
+  thermodynamic_factor: 1.02
+
+  density_g_cm3: 1.25 # FEC is denser (1.454 g/cm³)
+  viscosity_mPas: 4.80 # FEC increases viscosity
+  dielectric_constant: 18.5
+
+  concentration_dependent: true
+  temperature_dependent: true
+  expression_key: "LiPF6_FEC_DMC_Cao2021"
+
+  electrochemical_window_V: [0.0, 4.5]
+  compatible_anodes: ["silicon", "si_graphite"] # primary use case
+  compatible_cathodes:
+    ["NMC811", "NMC622", "NMC532", "NMC111", "NCA", "LCO", "LFP"]
+
+LiFSI_DME_1M:
+  family: "electrolyte"
+  aliases: ["ether_electrolyte", "LiFSI_ether"]
+  description: "1M LiFSI in DME (1,2-dimethoxyethane). Ether-based electrolyte
+    with high conductivity and transference number. Not stable above 4.0V —
+    use only with LFP cathode or for anode half-cell studies."
+
+  solvent: { DME: 1.00 }
+  salt: "LiFSI"
+  salt_concentration_mol_L: 1.0
+
+  ionic_conductivity_S_m: 1.60 # range: 1.3–1.8 S/m; ethers have low viscosity
+  li_diffusivity_m2_s: 5.50e-10 # DME is low-viscosity; fast transport
+  transference_number: 0.47 # range: 0.40–0.55; higher than carbonate
+  thermodynamic_factor: 0.98
+
+  density_g_cm3: 1.10
+  viscosity_mPas: 0.90 # very low — best for power applications
+  dielectric_constant: 7.2
+
+  concentration_dependent: true
+  temperature_dependent: true
+  expression_key: "LiFSI_DME_Wan2021"
+
+  electrochemical_window_V: [0.0, 4.0] # ether oxidation limit ~4.0V
+  compatible_anodes: ["graphite", "silicon", "si_graphite"]
+  compatible_cathodes: ["LFP"] # ONLY LFP — oxidatively unstable vs NMC
+
+# =============================================================================
+# SEPARATORS
+# =============================================================================
+# tortuosity values are from direct measurement (µ-CT or electrochemical
+# impedance) where available, not from Bruggeman fitting.
+# MacMullin number Nm = τ/ε (dimensionless resistance ratio)
+# =============================================================================
+
+Celgard2325:
+  family: "separator"
+  description:
+    "PP/PE/PP trilayer microporous membrane. Industry-standard separator
+    for high-energy Li-ion cells. PE core provides shutdown at ~130°C."
+  construction: "trilayer_PP_PE_PP"
+
+  # Geometry
+  thickness_um: 25.0
+  porosity:
+    0.39 # manufacturer spec; range 0.37–0.41
+    # (Lagadec et al. 2016 µ-CT: 0.41)
+  mean_pore_size_nm: 28.0 # range: 20–40 nm
+  pore_size_distribution: "bimodal" # characteristic of trilayer structure
+
+  # Transport (measured, not Bruggeman-derived)
+  tortuosity: 2.30 # range: 1.8–3.2; µ-CT measurement
+  macmullin_number: 5.90 # Nm = τ/ε = 2.3/0.39
+  bruggeman_exponent: 1.90 # fitted from ε and τ: τ = ε^(1-β)
+
+  # Mechanical
+  tensile_strength_MD_MPa: 110.0 # machine direction
+  tensile_strength_TD_MPa: 14.0 # transverse direction
+  puncture_strength_gf: 300.0
+  thermal_shutdown_temp_C: 130.0 # PE layer melts and closes pores
+  meltdown_temp_C: 165.0 # PP layer failure
+
+  vis_color_hex: "#FFFAF0" # floral white
+  vis_color_rgb: [255, 250, 240]
+
+Celgard2500:
+  family: "separator"
+  description: "PP monolayer microporous membrane. Higher porosity than 2325
+    gives better ionic transport but no thermal shutdown layer."
+  construction: "monolayer_PP"
+
+  thickness_um: 25.0
+  porosity: 0.55 # manufacturer spec; range 0.52–0.58
+  mean_pore_size_nm: 64.0 # larger pores than 2325
+  pore_size_distribution: "unimodal"
+
+  tortuosity: 1.80 # range: 1.5–2.2; lower than 2325
+  macmullin_number: 3.27 # 1.80/0.55
+  bruggeman_exponent: 1.55
+
+  tensile_strength_MD_MPa: 90.0
+  tensile_strength_TD_MPa: 18.0
+  puncture_strength_gf: 180.0
+  thermal_shutdown_temp_C: null # no shutdown — monolayer PP only
+  meltdown_temp_C: 165.0
+
+  vis_color_hex: "#F5F5F5" # white smoke
+  vis_color_rgb: [245, 245, 245]
+
+Celgard3501:
+  family: "separator"
+  description: "Surfactant-coated PP monolayer. Hydrophilic surface treatment
+    improves electrolyte wettability. Common in aqueous and hybrid cells."
+  construction: "monolayer_PP_surfactant_coated"
+
+  thickness_um: 25.0
+  porosity: 0.45 # range: 0.42–0.48
+  mean_pore_size_nm: 40.0
+  pore_size_distribution: "unimodal"
+
+  tortuosity: 2.00 # slightly higher than 2500 due to surface layer
+  macmullin_number: 4.44
+  bruggeman_exponent: 1.70
+
+  tensile_strength_MD_MPa: 90.0
+  tensile_strength_TD_MPa: 18.0
+  puncture_strength_gf: 190.0
+  thermal_shutdown_temp_C: null
+  meltdown_temp_C: 165.0
+
+  vis_color_hex: "#FAFAFA"
+  vis_color_rgb: [250, 250, 250]
+
+ceramic_PP:
+  family: "separator"
+  description: "PP monolayer coated on both sides with Al2O3 ceramic particles.
+    Higher tortuosity than bare PP but much better thermal stability and wettability.
+    Used in high-safety automotive cells."
+  construction: "PP_Al2O3_ceramic_coated"
+
+  # Total thickness includes 3–5 µm ceramic coating per side
+  thickness_um: 28.0 # range: 25–35 µm (base 20µm + 2×4µm ceramic)
+  ceramic_layer_thickness_um: 4.0 # per side; Al2O3 slurry coating
+  porosity: 0.40 # range: 0.35–0.45; ceramic reduces open area
+  mean_pore_size_nm: 35.0
+  pore_size_distribution: "bimodal"
+
+  tortuosity:
+    2.80 # range: 2.2–3.5; ceramic layer increases τ
+    # (Lagadec et al. 2016 µ-CT: 2.8 for MTI ceramic)
+  macmullin_number: 7.00
+  bruggeman_exponent: 2.10
+
+  tensile_strength_MD_MPa: 100.0
+  tensile_strength_TD_MPa: 12.0 # ceramic coating reduces TD strength
+  puncture_strength_gf: 350.0 # ceramic improves puncture resistance
+  thermal_shutdown_temp_C: null # no PE layer
+  meltdown_temp_C: 200.0 # ceramic layer maintains integrity to >200°C
+
+  vis_color_hex: "#E8E8E8" # light grey (ceramic appearance)
+  vis_color_rgb: [232, 232, 232]
+
+# =============================================================================
+# CURRENT COLLECTOR — CATHODE SIDE
+# =============================================================================
+
+al_foil:
+  family: "current_collector"
+  description: "Electrolytic aluminium foil for cathode current collector.
+    Al is used on the cathode side (not anode) because it does not alloy with Li
+    at cathode potentials (>3V vs Li/Li+). At anode potentials Al would alloy."
+
+  density_g_cm3: 2.70
+  electrical_conductivity_S_m: 3.77e7 # range: 3.5e7–3.9e7 S/m at 25°C
+  molar_mass_g_mol: 26.98
+
+  # Standard foil dimensions
+  thickness_min_um: 10.0
+  thickness_max_um: 20.0
+  surface_roughness_Ra_nm_min: 100.0
+  surface_roughness_Ra_nm_max: 600.0
+
+  vis_color_hex: "#D3D3D3" # light grey
+  vis_color_rgb: [211, 211, 211]
