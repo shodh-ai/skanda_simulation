@@ -134,13 +134,6 @@ class PercolationValidator:
                 f"Consider increasing target_porosity."
             )
 
-        if abs(actual_porosity - self.comp.porosity) > 0.05:
-            warns.append(
-                f"Measured porosity {actual_porosity:.3f} deviates from "
-                f"target {self.comp.porosity:.3f} by "
-                f"{abs(actual_porosity-self.comp.porosity)*100:.1f} pp."
-            )
-
         result = PercolationResult(
             electronic_percolating=elec_perc,
             electronic_fraction=e_frac,

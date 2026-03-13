@@ -148,11 +148,13 @@ def run_generation(
 
             # ── Step 2b: Rasterize carbon (pre-calender) ──────────────────
             _log(" Step 2b: Rasterizing carbon scaffold...")
+            nz_pre = round(domain.Lz_pre_nm / domain.voxel_size_nm)
             raster_pre: RasterResult = _timed(
                 f"2b_raster_pre_attempt{attempt}",
                 rasterize_carbon,
                 packing,
                 domain,
+                nz_pre,
             )
             _log(raster_pre.summary())
             _collect_warnings(raster_pre.warnings, "Step 2b", pipeline_warns)
@@ -193,9 +195,17 @@ def run_generation(
             t5 = time.perf_counter()
 
             # apply_calendering handles both particle mutation and field compression
-            si_result, cbd_result = apply_calendering(
-                packing.particles, comp, domain, si_result, cbd_result, sim
+            calendered = _timed(
+                f"5_calendering_attempt{attempt}",
+                apply_calendering,
+                packing.particles,
+                comp,
+                domain,
+                si_result,
+                cbd_result,
+                sim,
             )
+            si_result, cbd_result = calendered
             _collect_warnings(si_result.warnings, "Step 5-si", pipeline_warns)
             _collect_warnings(cbd_result.warnings, "Step 5-cbd", pipeline_warns)
 
@@ -203,12 +213,6 @@ def run_generation(
             raster_final: RasterResult = rasterize_carbon(packing, domain)
             _collect_warnings(raster_final.warnings, "Step 5-raster", pipeline_warns)
             carbon_label = raster_final.carbon_label
-
-            step_times[f"5_calendering_attempt{attempt}"] = time.perf_counter() - t5
-            _log(
-                f"  [5_calendering_attempt{attempt}] "
-                f"{step_times[f'5_calendering_attempt{attempt}']:.3f}s"
-            )
 
             # ── Step 6: SEI ───────────────────────────────────────────────
             _log(" Step 6: SEI formation...")

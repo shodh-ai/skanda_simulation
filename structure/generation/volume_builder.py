@@ -67,7 +67,7 @@ def _validate_volume(
         )
 
     # ── 2. Porosity consistency ───────────────────────────────────────────
-    measured_por = float(pore_vf.astype(np.float64).mean())
+    measured_por = meta.measured_porosity
     por_delta = abs(measured_por - meta.target_porosity)
     if por_delta > 0.05:
         warns.append(
@@ -141,24 +141,25 @@ def assemble_volume(
     """
     # Carbon: binary label → float32
     carbon_vf = (carbon_label == PHASE_GRAPHITE).astype(np.float32)
-
     si_vf = si_result.si_vf.astype(np.float32)
     coating_vf = si_result.coating_vf.astype(np.float32)
     cbd_vf = cbd_result.cbd_vf.astype(np.float32)
     binder_vf = cbd_result.binder_vf.astype(np.float32)
     sei_vf = sei_result.sei_vf.astype(np.float32)
 
-    # Derive pore_vf (float64 accumulation then cast)
-    solid_sum = (
-        carbon_vf.astype(np.float64)
-        + si_vf.astype(np.float64)
-        + coating_vf.astype(np.float64)
-        + cbd_vf.astype(np.float64)
-        + binder_vf.astype(np.float64)
-        + sei_vf.astype(np.float64)
-    )
+    # CBD, Binder, and SEI live in the pore space outside carbon.
+    free_from_carbon = np.clip(1.0 - carbon_vf, 0.0, 1.0)
+    cbd_vf = (cbd_vf * free_from_carbon).astype(np.float32)
+    binder_vf = (binder_vf * free_from_carbon).astype(np.float32)
+    sei_vf = (sei_vf * free_from_carbon).astype(np.float32)
+
+    # Si and Coating can be inside carbon (embedded, core-shell).
+    # Where they exist, they displace the carbon host volume.
+    carbon_vf = np.clip(carbon_vf - si_vf - coating_vf, 0.0, 1.0).astype(np.float32)
+
+    solid_sum = carbon_vf + si_vf + coating_vf + cbd_vf + binder_vf + sei_vf
     pore_vf = np.clip(1.0 - solid_sum, 0.0, 1.0).astype(np.float32)
-    measured_porosity = float(pore_vf.astype(np.float64).mean())
+    measured_porosity = float(pore_vf.mean())
 
     meta = VolumeMetadata(
         run_id=sim.run_id,

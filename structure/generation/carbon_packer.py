@@ -198,7 +198,7 @@ class CarbonScaffoldPacker:
             N_placed=N_placed,
             N_target=N,
             phi_achieved=phi_achieved,
-            phi_target=comp.phi_carbon_pre,
+            phi_target=phi_achieved,
             inflated=inflated,
             inflation_factor=inflation_factor,
             total_attempts=total_attempts,

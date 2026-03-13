@@ -45,6 +45,7 @@ from structure.phases import PHASE_GRAPHITE
 def rasterize_carbon(
     packing: PackingResult,
     domain: DomainGeometry,
+    nz_override: int | None = None,
 ) -> RasterResult:
     """
     Rasterize placed carbon particles into a uint8 label array.
@@ -57,10 +58,11 @@ def rasterize_carbon(
     Returns:
         RasterResult with carbon_label uint8 array and diagnostics.
     """
-    nx, ny, nz = domain.nx, domain.ny, domain.nz
+    nx, ny = domain.nx, domain.ny
     vs = domain.voxel_size_nm
     Lx = domain.Lx_nm
     Ly = domain.Ly_nm
+    nz = nz_override if nz_override is not None else domain.nz
 
     carbon_label = np.zeros((nx, ny, nz), dtype=np.uint8)
     warns: list[str] = []
@@ -147,7 +149,12 @@ def rasterize_carbon(
     # Sanity check: measured VF vs target
     # (packing.phi_target is pre-calender; after compression vf ≈ phi_target)
     if packing.phi_target > 0:
-        vf_delta = abs(vf_carbon - packing.phi_target)
+        is_precalender = nz_override is not None
+        if is_precalender:
+            vf_reference = packing.phi_target
+        else:
+            vf_reference = packing.phi_target / domain.compression_ratio
+        vf_delta = abs(vf_carbon - vf_reference)
         if vf_delta > 0.05:
             warns.append(
                 f"Rasterized carbon VF={vf_carbon:.4f} deviates from "

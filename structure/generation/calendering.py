@@ -207,8 +207,8 @@ def calender_fields(
             return np.zeros_like(field, dtype=np.float32), None
 
         zoomed = zoom(field.astype(np.float32), [1.0, 1.0, cr], order=1)
-        out = np.zeros_like(field, dtype=np.float32)
         nz_new = min(zoomed.shape[2], nz)
+        out = np.zeros((field.shape[0], field.shape[1], nz), dtype=np.float32)
         out[:, :, :nz_new] = zoomed[:, :, :nz_new]
 
         # Renormalize before clip
@@ -240,8 +240,8 @@ def calender_fields(
     def _compress_mask(mask: np.ndarray) -> np.ndarray:
         """Compress a boolean mask in Z using nearest-neighbour interpolation."""
         zoomed = zoom(mask.astype(np.float32), [1.0, 1.0, cr], order=0)
-        out = np.zeros_like(mask, dtype=bool)
         nz_new = min(zoomed.shape[2], nz)
+        out = np.zeros((mask.shape[0], mask.shape[1], nz), dtype=bool)
         out[:, :, :nz_new] = zoomed[:, :, :nz_new] > 0.5
         return out
 

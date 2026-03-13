@@ -106,7 +106,13 @@ def compute_composition(sim: ResolvedGeneration) -> CompositionState:
 
     V_carbon_med = _oblate_spheroid_volume(carbon_a, carbon_ar)
     V_carbon_mean = V_carbon_med * _lognormal_d3_correction(cb.size_cv)
-    N_carbon = max(1, round(V_carbon_nm3 / V_carbon_mean))
+
+    if sim.silicon.distribution in ("embedded", "core_shell"):
+        scaffold_V_target = V_carbon_nm3 + V_si_nm3
+    else:
+        scaffold_V_target = V_carbon_nm3
+
+    N_carbon = max(1, round(scaffold_V_target / V_carbon_mean))
 
     # ── 5. Si particle geometry ──────────────────────────────────────────────
     si_d50 = si.d50_nm
@@ -148,7 +154,13 @@ def compute_composition(sim: ResolvedGeneration) -> CompositionState:
     cr = sim.calendering_compression_ratio
     L_z_pre = L_nm / cr
     phi_pre = V_solid / (L_nm**2 * L_z_pre)  # = (1 - porosity) × cr
-    phi_carbon_pre = phi_pre * vf_carbon_val  # carbon's share of pre-calender solid
+
+    # If Si is inside the carbon scaffold, the scaffold must be packed to
+    # the combined volume of Carbon + Si so that Si can displace carbon later.
+    if sim.silicon.distribution in ("embedded", "core_shell"):
+        phi_carbon_pre = phi_pre * (vf_carbon_val + vf_si_val)
+    else:
+        phi_carbon_pre = phi_pre * vf_carbon_val  # carbon's share of pre-calender solid
 
     # ── 10. Validation ───────────────────────────────────────────────────────
     warns = _validate(

@@ -137,7 +137,7 @@ class SiVfMapper:
         comp = self.comp
         domain = self.domain
         sim = self.sim
-        nx, ny, nz = domain.nx, domain.ny, domain.nz
+        nx, ny, nz = carbon_label.shape
         vs = domain.voxel_size_nm
         cr = comp.compression_ratio
         Lx = domain.Lx_nm
@@ -403,8 +403,7 @@ class SiVfMapper:
 
         # Suppress coating inside carbon voxels — Si-C interface is already
         # solid; coating here would cause carbon_vf + coating_vf > 1.
-        carbon_mask = carbon_label == PHASE_GRAPHITE
-        coating_vf[carbon_mask] = 0.0
+        coating_vf[carbon_label == PHASE_GRAPHITE] = 0.0
 
         # Coating cannot exceed 1.0 (physical cap)
         coating_vf = np.clip(coating_vf, 0.0, 1.0)

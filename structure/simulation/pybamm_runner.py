@@ -15,7 +15,7 @@ import math
 from typing import Optional
 
 import numpy as np
-
+import contextlib
 from structure.schema import ResolvedSimulation
 from structure.data import RateCapabilityResult, DCIRResult, CycleLifeResult
 import pybamm
@@ -111,19 +111,25 @@ def run_rate_capability(
             sol = psim.solution
 
             if not _solution_is_valid(sol):
-                raise ValueError(
-                    "PyBaMM experiment returned an empty solution — "
-                    "check parameter set and voltage window."
-                )
+                raise ValueError("PyBaMM experiment returned an empty solution.")
 
-            I = sol["Current [A]"].entries
-            t = sol["Time [s]"].entries
-            V = sol["Terminal voltage [V]"].entries
+            # The discharge is the last step in the cycle — extract only this window
+            if hasattr(sol, "cycles") and len(sol.cycles) > 0:
+                step_sol = sol.cycles[-1].steps[-1]
+            elif hasattr(sol, "sub_solutions") and len(sol.sub_solutions) > 0:
+                step_sol = sol.sub_solutions[-1]
+            else:
+                step_sol = sol
+
+            I = step_sol["Current [A]"].entries
+            t = step_sol["Time [s]"].entries
+            V = step_sol["Terminal voltage [V]"].entries
 
             Q_mAh_cm2 = float(np.trapezoid(np.abs(I), t)) / 3600.0 * 1000.0 / area_cm2
             E_mWh_cm2 = (
                 float(np.trapezoid(V * np.abs(I), t)) / 3600.0 * 1000.0 / area_cm2
             )
+
             capacities.append(Q_mAh_cm2)
             energy_densities.append(E_mWh_cm2)
 
@@ -139,10 +145,7 @@ def run_rate_capability(
     E_nom = energy_densities[idx_nom]
 
     if math.isnan(Q_nom):
-        warns.append(
-            "Nominal capacity (C/5) simulation failed — "
-            "check parameter set and voltage window."
-        )
+        warns.append("Nominal capacity (C/5) simulation failed.")
 
     return RateCapabilityResult(
         c_rates=proto.c_rates,
@@ -165,22 +168,23 @@ def run_dcir_pulse(
 ) -> DCIRResult:
     proto = sim.dcir_pulse
     area_cm2 = sim.cell_area_cm2
+    voltage_window = sim.voltage_cutoff_high_V - sim.voltage_cutoff_low_V
     warns: list[str] = []
 
+    dcir = _NAN
+    delta_V = _NAN
+
     try:
-        # Discharge time to reach target SOC from 100% at C/10
+        # Cell is at 100% SOC. Discharge to target SOC at C/10.
         discharge_s = int((1.0 - proto.soc_point) * 36000)
 
-        steps = [
-            f"Charge at C/10 until {sim.voltage_cutoff_high_V}V",
-            "Rest for 60 seconds",
-        ]
+        steps = []
         if discharge_s > 0:
             steps.append(f"Discharge at C/10 for {discharge_s} seconds")
+
         steps += [
             "Rest for 30 seconds",
-            f"Discharge at {proto.pulse_c_rate}C "
-            f"for {int(proto.pulse_duration_s)} seconds",
+            f"Discharge at {proto.pulse_c_rate}C for {int(proto.pulse_duration_s)} seconds",
         ]
 
         psim = pybamm.Simulation(
@@ -196,28 +200,31 @@ def run_dcir_pulse(
             raise ValueError("PyBaMM experiment returned an empty solution.")
 
         # Pulse step is the last step — extract only that window
-        n_steps = len(steps)
-        step_sol = sol.cycles[-1] if hasattr(sol, "cycles") else sol
+        if hasattr(sol, "cycles") and len(sol.cycles) > 0:
+            stepsol = sol.cycles[-1].steps[-1]
+        elif hasattr(sol, "sub_solutions") and len(sol.sub_solutions) > 0:
+            stepsol = sol.sub_solutions[-1]
+        else:
+            raise ValueError("Could not locate step solutions in PyBaMM Solution.")
 
-        V_pulse = step_sol["Terminal voltage [V]"].entries
-        I_pulse = step_sol["Current [A]"].entries
+        Vpulse = stepsol["Terminal voltage [V]"].entries
+        Vbefore = float(Vpulse[0])
+        Vafter = float(Vpulse[-1])
+        delta_V = Vbefore - Vafter
 
-        V_before = float(V_pulse[0])
-        V_after = float(V_pulse[-1])
-        I_mean = float(np.mean(np.abs(I_pulse)))
-        delta_V = V_before - V_after
+        if delta_V > voltage_window:
+            warns.append(f"delta_V={delta_V*1000:.2f} mV exceeds voltage window.")
+            dcir = _NAN
+            delta_V = _NAN
+        else:
+            Ipulse = stepsol["Current [A]"].entries
+            Imean = float(np.mean(np.abs(Ipulse)))
+            if Imean < 1e-12:
+                raise ValueError("Near-zero pulse current.")
+            dcir = delta_V / Imean * area_cm2 * 1000.0
 
-        if I_mean < 1e-12:
-            raise ValueError("Near-zero pulse current — check C-rate and capacity.")
-
-        dcir = (delta_V / I_mean) * area_cm2 * 1000.0  # mΩ·cm²
-
-        if dcir < 0:
-            warns.append(
-                f"Negative DCIR ({dcir:.2f} mΩ·cm²) — "
-                f"voltage rose during discharge pulse (unexpected). "
-                f"Check SOC targeting."
-            )
+            if dcir < 0:
+                warns.append("Negative DCIR — voltage rose during discharge pulse.")
 
     except Exception as exc:
         warns.append(f"DCIR pulse failed: {exc}")
@@ -247,14 +254,21 @@ def run_cycle_life(
     area_cm2 = sim.cell_area_cm2
     warns: list[str] = []
 
+    cycle_numbers = []
+    capacities_mAh_cm2 = []
+    Q_init = _NAN
+    Q_final = _NAN
+    retention = _NAN
+    fade_pct = _NAN
+    projected = None
+
     try:
+        # We initialize at 100% SOC, so start with discharge.
         exp = pybamm.Experiment(
             [
                 (
-                    f"Charge at {proto.charge_c_rate}C until "
-                    f"{sim.voltage_cutoff_high_V}V",
-                    f"Discharge at {proto.discharge_c_rate}C until "
-                    f"{sim.voltage_cutoff_low_V}V",
+                    f"Discharge at {proto.discharge_c_rate}C until {sim.voltage_cutoff_low_V}V",
+                    f"Charge at {proto.charge_c_rate}C until {sim.voltage_cutoff_high_V}V",
                 )
             ]
             * proto.n_cycles
@@ -271,19 +285,24 @@ def run_cycle_life(
         if not _solution_is_valid(sol):
             raise ValueError("PyBaMM experiment returned an empty solution.")
 
-        cycle_numbers: list[int] = []
-        capacities_mAh_cm2: list[float] = []
-
-        all_cycles = sol.cycles if hasattr(sol, "cycles") else [sol]
+        all_cycles = (
+            sol.cycles if hasattr(sol, "cycles") and len(sol.cycles) > 0 else [sol]
+        )
 
         for i, cyc in enumerate(all_cycles):
             if i % proto.record_every_n_cycles == 0 or i == len(all_cycles) - 1:
                 try:
-                    I = cyc["Current [A]"].entries
-                    t = cyc["Time [s]"].entries
-                    mask = I > 0
+                    # In a cycle starting with discharge, the discharge is the FIRST step.
+                    if hasattr(cyc, "steps") and len(cyc.steps) > 0:
+                        step_sol = cyc.steps[0]
+                    else:
+                        step_sol = cyc
+
+                    I = step_sol["Current [A]"].entries
+                    t = step_sol["Time [s]"].entries
+                    mask = I > 0  # Discharge is positive current in PyBaMM
                     if mask.sum() < 2:
-                        mask = np.ones_like(I, dtype=bool)
+                        continue
                     Q = (
                         float(np.trapezoid(np.abs(I[mask]), t[mask]))
                         / 3600.0
@@ -305,91 +324,21 @@ def run_cycle_life(
 
         eol_reached = Q_final <= eol_Q
 
-        # ── Fit + projection ─────────────────────────────────────────────
-        # Try linear first, then exponential.
-        # Exponential: Q(n) = Q0 * exp(-k*n) → ln(Q/Q0) = -k*n
-        # Use whichever gives a better R² on the recorded data.
-
         ns = np.array(cycle_numbers, dtype=float)
         qs = np.array(capacities_mAh_cm2, dtype=float)
 
         # Linear fit
         lin_coeffs = np.polyfit(ns, qs, 1)
         lin_slope = lin_coeffs[0]
-        lin_q_pred = np.polyval(lin_coeffs, ns)
-        lin_r2 = _r2(qs, lin_q_pred)
         fade_pct = abs(lin_slope) / Q_init * 100.0
 
-        # Exponential fit (only valid when all Q > 0)
-        exp_k = _NAN
-        exp_r2 = -1.0
-        exp_q_pred = None
-        if np.all(qs > 0):
-            try:
-                log_qs = np.log(qs / Q_init)
-                exp_coeffs = np.polyfit(ns, log_qs, 1)
-                exp_k = -exp_coeffs[0]  # decay rate per cycle
-                exp_q_pred = Q_init * np.exp(-exp_k * ns)
-                exp_r2 = _r2(qs, exp_q_pred)
-            except Exception:
-                pass
-
-        # Choose better fit
-        use_exp = (not math.isnan(exp_k)) and (exp_r2 > lin_r2 + 0.01)
-
-        if use_exp:
-            warns.append(
-                f"Exponential fit (R²={exp_r2:.4f}) chosen over "
-                f"linear (R²={lin_r2:.4f}) for cycle life projection."
-            )
-
-        # Project EOL
-        projected: Optional[int] = None
-
         if eol_reached:
-            # EOL already hit — interpolate from recorded data
             projected = _interpolate_eol(cycle_numbers, capacities_mAh_cm2, eol_Q)
-            warns.append(
-                f"EOL ({proto.end_of_life_retention:.0%} retention) reached "
-                f"within {proto.n_cycles} cycles."
-            )
-        else:
-            # EOL not reached — extrapolate from chosen fit
-            if use_exp and not math.isnan(exp_k) and exp_k > 0:
-                # Q(n) = Q0 * exp(-k*n) = eol_Q → n = -ln(eol_frac) / k
-                eol_frac = proto.end_of_life_retention
-                projected = int(-math.log(eol_frac) / exp_k)
-            elif lin_slope < 0:
-                projected = int((Q_init - eol_Q) / abs(lin_slope))
-            else:
-                warns.append(
-                    "Capacity is not declining — cannot project EOL. "
-                    "Consider running more cycles."
-                )
-
-            if projected is not None:
-                extrap_factor = projected / proto.n_cycles
-                warns.append(
-                    f"EOL not reached in {proto.n_cycles} cycles — "
-                    f"projected {projected} cycles by "
-                    f"{'exponential' if use_exp else 'linear'} extrapolation "
-                    f"({extrap_factor:.1f}× beyond simulated range)."
-                )
-                if extrap_factor > 5.0:
-                    warns.append(
-                        f"Extrapolation factor {extrap_factor:.1f}× is large — "
-                        f"consider increasing n_cycles for a more reliable projection."
-                    )
+        elif lin_slope < 0:
+            projected = int((Q_init - eol_Q) / abs(lin_slope))
 
     except Exception as exc:
         warns.append(f"Cycle life failed: {exc}")
-        cycle_numbers = []
-        capacities_mAh_cm2 = []
-        Q_init = _NAN
-        Q_final = _NAN
-        retention = _NAN
-        fade_pct = _NAN
-        projected = None
 
     return CycleLifeResult(
         cycles_run=proto.n_cycles,
