@@ -30,7 +30,10 @@ _SEI_MAP: dict[str, str] = {
 
 
 def _make_model(sim: ResolvedSimulation) -> "pybamm.lithium_ion.BaseModel":
-    opts: dict = {}
+    opts: dict = {
+        "particle mechanics": ("swelling and cracking", "none"),
+        "lithium plating": "none",
+    }
     sei_key = sim.pybamm.sei_model
     if sei_key != "none":
         pybamm_sei = _SEI_MAP.get(sei_key)

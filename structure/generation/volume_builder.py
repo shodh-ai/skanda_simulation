@@ -200,6 +200,8 @@ def assemble_volume(
         si_density_g_cm3=sim.silicon.density_g_cm3,
         si_molar_mass_g_mol=sim.silicon.molar_mass_g_mol,
         si_volume_expansion_factor=sim.silicon.volume_expansion_factor,
+        si_young_modulus_GPa=sim.silicon.young_modulus_GPa,
+        si_poisson_ratio=sim.silicon.poisson_ratio,
     )
 
     warns = _validate_volume(

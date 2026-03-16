@@ -104,6 +104,8 @@ class VolumeMetadata:
     si_density_g_cm3: float
     si_molar_mass_g_mol: float
     si_volume_expansion_factor: float
+    si_young_modulus_GPa: float
+    si_poisson_ratio: float
 
 
 # ---------------------------------------------------------------------------

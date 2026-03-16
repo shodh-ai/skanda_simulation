@@ -175,6 +175,56 @@ def build_parameter_set(
     ) / 3600.0
     practical_fraction = y_0 - y_100
     param["Nominal cell capacity [A.h]"] = cat_theoretical_Ah * practical_fraction
+    param["Negative electrode partial molar volume [m3.mol-1]"] = 8.39e-6
+    param["Negative electrode Young's modulus [Pa]"] = m.si_young_modulus_GPa * 1e9
+    param["Negative electrode Poisson's ratio"] = m.si_poisson_ratio
+    param[
+        "Negative electrode reference concentration for free of deformation [mol.m-3]"
+    ] = 0.0
+    param["Negative electrode volume change"] = (
+        lambda sto: (vol.metadata.si_volume_expansion_factor - 1.0) * sto
+    )
+
+    # --- Paris' Law scalars (b, m) --- [web:15][web:17]
+    param["Negative electrode Paris' law constant b"] = (
+        1.12  # geometry factor (dimensionless)
+    )
+    param["Negative electrode Paris' law constant m"] = (
+        2.2  # Paris exponent (dimensionless)
+    )
+
+    # --- Crack geometry ---
+    param["Negative electrode initial crack length [m]"] = 2e-8  # 20 nm
+    param["Negative electrode initial crack width [m]"] = 1.5e-8  # 15 nm
+    param["Negative electrode number of cracks per unit area [m-2]"] = 3.18e15
+
+    # --- Fracture threshold ---
+    param["Negative electrode critical stress [Pa]"] = 6e7  # 60 MPa, typical for Si
+
+    # --- Cracking rate: k_cr(T), Arrhenius form (Ai2020 style) --- [web:15]
+    def si_cracking_rate(T_dim):
+        # Si is ~100x more crack-prone than graphite; Ai2020 graphite k_cr = 3.9e-20
+        # Si value scaled up accordingly (Bucci 2017, fracture-mechanics basis)
+        k_cr = 3.9e-18  # [m / (Pa·m^0.5)^m]
+        E_ac = 0.0  # activation energy [J/mol] — set 0 for isothermal runs
+        arrhenius = pybamm.exp(E_ac / pybamm.constants.R * (1 / T_dim - 1 / 298.15))
+        return k_cr * arrhenius
+
+    param["Negative electrode cracking rate"] = si_cracking_rate
+
+    # --- LAM (Loss of Active Material) driven by cracking ---
+    param["Negative electrode LAM constant proportional term [s-1]"] = 2.7778e-7
+    param["Negative electrode activation energy for cracking rate [kJ.mol-1]"] = 0.0
+
+    param["Positive electrode partial molar volume [m3.mol-1]"] = (
+        0.0  # no volume change
+    )
+    param["Positive electrode Young's modulus [Pa]"] = 375e9  # NMC/LFP stiff cathode
+    param["Positive electrode Poisson's ratio"] = 0.3
+    param[
+        "Positive electrode reference concentration for free of deformation [mol.m-3]"
+    ] = 0.0
+    param["Positive electrode volume change"] = lambda sto: 0.0 * sto
 
     return param
 
