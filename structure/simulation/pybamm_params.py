@@ -144,6 +144,12 @@ def build_parameter_set(
     c_s_n_max = float(param["Maximum concentration in negative electrode [mol.m-3]"])
     c_s_p_max = float(param["Maximum concentration in positive electrode [mol.m-3]"])
 
+    param["Positive electrode exchange-current density [A.m-2]"] = (
+        lambda c_e, c_s_surf, c_s_max, T: cat.exchange_current_density_A_m2
+        * (c_s_surf / c_s_max) ** 0.5
+        * (1 - c_s_surf / c_s_max) ** 0.5
+    )
+
     # Calculate required cathode thickness to perfectly honor np_ratio in PyBaMM
     # Capacity proxy = c_s_max * am_vol_frac * thickness
     anode_capacity_proxy = c_s_n_max * am_vol_frac * (m.electrode_thickness_um * 1e-6)
@@ -156,8 +162,8 @@ def build_parameter_set(
     param["Positive electrode thickness [m]"] = cat_thickness_m
     # Chen2020 100% SOC stoichiometries (fully charged bounds)
     x_100 = 0.80
-    y_100 = 0.26
-    y_0 = 0.90  # 0% SOC stoichiometry
+    y_100 = cat.stoichiometry_charged
+    y_0 = cat.stoichiometry_discharged
 
     # Initialize cell at fully charged state (100% SOC) so experiments can start with discharge
     param["Initial concentration in negative electrode [mol.m-3]"] = x_100 * c_s_n_max
@@ -173,29 +179,51 @@ def build_parameter_set(
         * (sim.cell_area_cm2 * 1e-4)
         * 96485.332
     ) / 3600.0
-    practical_fraction = y_0 - y_100
-    param["Nominal cell capacity [A.h]"] = cat_theoretical_Ah * practical_fraction
+    cat_practical_Ah = cat_theoretical_Ah * (y_0 - y_100)
+    # 2. Anode practical capacity (assume discharged x_0 ≈ 0.02)
+    anode_theoretical_Ah = (
+        c_s_n_max
+        * am_vol_frac
+        * (m.electrode_thickness_um * 1e-6)
+        * (sim.cell_area_cm2 * 1e-4)
+        * 96485.332
+    ) / 3600.0
+    anode_practical_Ah = anode_theoretical_Ah * (x_100 - 0.02)
+    param["Nominal cell capacity [A.h]"] = min(cat_practical_Ah, anode_practical_Ah)
+    param["Positive electrode exchange-current density [A.m-2]"] = (
+        lambda c_e, c_s_surf, c_s_max, T: cat.exchange_current_density_A_m2
+        * 2.0  # Scale so peak at c_s_max/2 equals the DB value
+        * (c_e / 1000.0) ** 0.5  # <-- CRUCIAL for high C-rate limits
+        * (c_s_surf / c_s_max) ** 0.5
+        * (1 - c_s_surf / c_s_max) ** 0.5
+    )
     param["Negative electrode partial molar volume [m3.mol-1]"] = 8.39e-6
-    param["Negative electrode Young's modulus [Pa]"] = m.si_young_modulus_GPa * 1e9
-    param["Negative electrode Poisson's ratio"] = m.si_poisson_ratio
+    v_si = vol.metadata.vf_si
+    v_c = vol.metadata.vf_carbon
+    v_tot = v_si + v_c
+
+    si_E = vol.metadata.si_young_modulus_GPa
+    c_E = 15.0  # Typical graphite Young's modulus in GPa
+    eff_E = (v_si * si_E + v_c * c_E) / v_tot if v_tot > 0 else c_E
+
+    param["Negative electrode Young's modulus [Pa]"] = eff_E * 1e9
+    param["Negative electrode Poisson's ratio"] = vol.metadata.si_poisson_ratio
     param[
         "Negative electrode reference concentration for free of deformation [mol.m-3]"
     ] = 0.0
-    param["Negative electrode volume change"] = (
-        lambda sto: (vol.metadata.si_volume_expansion_factor - 1.0) * sto
-    )
+
+    si_exp = vol.metadata.si_volume_expansion_factor - 1.0
+    c_exp = 0.10  # Typical graphite volume expansion (10%)
+    eff_expansion = (v_si * si_exp + v_c * c_exp) / v_tot if v_tot > 0 else c_exp
+
+    param["Negative electrode volume change"] = lambda sto: eff_expansion * sto
 
     # --- Paris' Law scalars (b, m) --- [web:15][web:17]
-    param["Negative electrode Paris' law constant b"] = (
-        1.12  # geometry factor (dimensionless)
-    )
-    param["Negative electrode Paris' law constant m"] = (
-        2.2  # Paris exponent (dimensionless)
-    )
-
+    param["Negative electrode Paris' law constant b"] = 1.12
+    param["Negative electrode Paris' law constant m"] = 2.2
     # --- Crack geometry ---
-    param["Negative electrode initial crack length [m]"] = 2e-8  # 20 nm
-    param["Negative electrode initial crack width [m]"] = 1.5e-8  # 15 nm
+    param["Negative electrode initial crack length [m]"] = 20e-9  # 20 nm
+    param["Negative electrode initial crack width [m]"] = 15e-9  # 15 nm
     param["Negative electrode number of cracks per unit area [m-2]"] = 3.18e15
 
     # --- Fracture threshold ---
@@ -205,7 +233,7 @@ def build_parameter_set(
     def si_cracking_rate(T_dim):
         # Si is ~100x more crack-prone than graphite; Ai2020 graphite k_cr = 3.9e-20
         # Si value scaled up accordingly (Bucci 2017, fracture-mechanics basis)
-        k_cr = 3.9e-18  # [m / (Pa·m^0.5)^m]
+        k_cr = 3.9e-20  # [m / (Pa·m^0.5)^m]
         E_ac = 0.0  # activation energy [J/mol] — set 0 for isothermal runs
         arrhenius = pybamm.exp(E_ac / pybamm.constants.R * (1 / T_dim - 1 / 298.15))
         return k_cr * arrhenius

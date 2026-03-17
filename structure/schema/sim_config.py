@@ -82,7 +82,7 @@ class CellConfig(BaseModel):
     anode: AnodeConfig
     cathode: CathodeConfig
     separator: SeparatorConfig
-    np_ratio: float = Field(..., ge=1.0, le=1.5)
+    np_ratio: float = Field(..., ge=0.05, le=2.0)
     cell_area_cm2: float = Field(..., gt=0, le=200.0)
 
 
@@ -107,7 +107,7 @@ class ElectrolyteConfig(BaseModel):
 
 class CyclingConfig(BaseModel):
     voltage_cutoff_low_V: float = Field(..., ge=2.0, le=3.0)
-    voltage_cutoff_high_V: float = Field(..., ge=4.0, le=4.35)
+    voltage_cutoff_high_V: float = Field(..., ge=3.0, le=4.35)
     protocols: list[Protocol] = Field(..., min_length=1)
 
     @model_validator(mode="after")

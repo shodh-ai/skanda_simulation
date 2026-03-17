@@ -272,6 +272,7 @@ def run_cycle_life(
                 (
                     f"Discharge at {proto.discharge_c_rate}C until {sim.voltage_cutoff_low_V}V",
                     f"Charge at {proto.charge_c_rate}C until {sim.voltage_cutoff_high_V}V",
+                    f"Hold at {sim.voltage_cutoff_high_V}V until C/20",
                 )
             ]
             * proto.n_cycles
@@ -301,17 +302,29 @@ def run_cycle_life(
                     else:
                         step_sol = cyc
 
-                    I = step_sol["Current [A]"].entries
-                    t = step_sol["Time [s]"].entries
-                    mask = I > 0  # Discharge is positive current in PyBaMM
-                    if mask.sum() < 2:
-                        continue
-                    Q = (
-                        float(np.trapezoid(np.abs(I[mask]), t[mask]))
-                        / 3600.0
-                        * 1000.0
-                        / area_cm2
-                    )
+                    try:
+                        Q = (
+                            float(
+                                step_sol["Discharge capacity [A.h]"].entries[-1]
+                                - step_sol["Discharge capacity [A.h]"].entries[0]
+                            )
+                            * 1000.0
+                            / area_cm2
+                        )
+                    except Exception:
+                        # Fallback
+                        I = step_sol["Current [A]"].entries
+                        t = step_sol["Time[s]"].entries
+                        mask = I > 0  # Discharge is positive current in PyBaMM
+                        if mask.sum() < 2:
+                            continue
+                        Q = (
+                            float(np.trapezoid(np.abs(I[mask]), t[mask]))
+                            / 3600.0
+                            * 1000.0
+                            / area_cm2
+                        )
+
                     cycle_numbers.append(i + 1)
                     capacities_mAh_cm2.append(Q)
                 except Exception as exc:
@@ -330,15 +343,20 @@ def run_cycle_life(
         ns = np.array(cycle_numbers, dtype=float)
         qs = np.array(capacities_mAh_cm2, dtype=float)
 
-        # Linear fit
-        lin_coeffs = np.polyfit(ns, qs, 1)
-        lin_slope = lin_coeffs[0]
-        fade_pct = abs(lin_slope) / Q_init * 100.0
+        # Robust endpoint-based fade rate calculation instead of a linear fit,
+        # which can be skewed if capacity trajectories are highly nonlinear.
+        if Q_init > 0 and proto.n_cycles > 0:
+            fade_pct = ((Q_init - Q_final) / Q_init) / proto.n_cycles * 100.0
+        else:
+            fade_pct = _NAN
 
         if eol_reached:
             projected = _interpolate_eol(cycle_numbers, capacities_mAh_cm2, eol_Q)
-        elif lin_slope < 0:
-            projected = int((Q_init - eol_Q) / abs(lin_slope))
+        else:
+            # Linear projection using the robust endpoint slope
+            drop_per_cycle = (Q_init - Q_final) / proto.n_cycles
+            if drop_per_cycle > 0:
+                projected = int((Q_init - eol_Q) / drop_per_cycle)
 
     except Exception as exc:
         warns.append(f"Cycle life failed: {exc}")

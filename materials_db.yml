@@ -465,6 +465,29 @@ lfp:
   vis_color_hex: "#228B22" # forest green
   vis_color_rgb: [34, 139, 34]
 
+lfp_halfcell_dummy:
+  family: "cathode"
+  formula: "LiFePO4"
+  description: "Dummy LFP cathode for half-cell simulation. Super-fast kinetics so only the Si anode is the bottleneck."
+  density_g_cm3: 3.60
+  molar_mass_g_mol: 157.76
+  theoretical_capacity_mAh_g: 170.0
+  practical_capacity_mAh_g: null
+  max_concentration_mol_m3: 22806.0
+  stoichiometry_charged: 0.02
+  stoichiometry_discharged: 0.98
+  li_diffusivity_m2_s: 1.0e-13 # 1000x faster than real LFP (5e-18)
+  electrical_conductivity_S_m: 1.0e2 # 1e6x faster than real LFP
+  exchange_current_density_A_m2: 10.0 # 10x faster than real LFP (1.0)
+  charge_transfer_coefficient: 0.5
+  voltage_min_V: 2.00
+  voltage_max_V: 3.80 # slightly wider than real LFP (3.65)
+  ocv_curve: "lfp_Prada2013"
+  capacity_fade_mechanism: "none"
+  cycle_life_typical_cycles: 10000
+  vis_color_hex: "228B22"
+  vis_color_rgb: [34, 139, 34]
+
 nca:
   family: "cathode"
   formula: "LiNi0.8Co0.15Al0.05O2"

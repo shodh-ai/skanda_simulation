@@ -21,10 +21,12 @@ cell:
 
   cathode:
     material:
-      "NMC811" # materialDB key
-      # options: NMC811, NMC622, NMC532, NMC111, LFP, NCA, LCO
+      "nmc811"
+      # options: NMC811, NMC622, NMC532, NMC111, LFP, lfp_halfcell_dummy, NCA, LCO
     thickness_um: 80.0 # range: 30–200 µm
     porosity: 0.30 # range: 0.20–0.45
+  
+  np_ratio: 0.5
 
   separator:
     material:
@@ -58,8 +60,8 @@ electrolyte:
 # =============================================================================
 
 cycling:
-  voltage_cutoff_low_V: 2.50 # range: 2.0–3.0 V
-  voltage_cutoff_high_V: 4.20 # range: 4.0–4.35 V
+  voltage_cutoff_low_V: 3.0 # range: 2.0–3.0 V
+  voltage_cutoff_high_V: 4.2 # range: 3.0–4.35 V
 
   protocols:
     # Nominal capacity + energy density indicator

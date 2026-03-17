@@ -324,6 +324,7 @@ class MaterialsDB(BaseModel):
     nmc532: CathodeMaterial
     nmc111: CathodeMaterial
     lfp: CathodeMaterial
+    lfp_halfcell_dummy: CathodeMaterial
     nca: CathodeMaterial
     lco: CathodeMaterial
 
