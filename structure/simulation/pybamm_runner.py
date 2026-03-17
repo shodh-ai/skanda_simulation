@@ -32,6 +32,8 @@ _SEI_MAP: dict[str, str] = {
 def _make_model(sim: ResolvedSimulation) -> "pybamm.lithium_ion.BaseModel":
     opts: dict = {
         "particle mechanics": ("swelling and cracking", "none"),
+        "SEI on cracks": "true",
+        "loss of active material": ("stress-driven", "none"),
         "lithium plating": "none",
     }
     sei_key = sim.pybamm.sei_model

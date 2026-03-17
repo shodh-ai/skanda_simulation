@@ -64,15 +64,6 @@ def build_parameter_set(
     cat_am_frac = 1.0 - sim.cathode.porosity - 0.05  # roughly 5% for binder/CBD
     param["Positive electrode active material volume fraction"] = cat_am_frac
 
-    cat_vol_cap = cat_am_frac * cat.density_g_cm3 * cat.theoretical_capacity_mAh_g
-
-    # New cathode thickness [cm] -> [m]
-    if cat_vol_cap > 0:
-        cat_thickness_cm = target_cathode_areal_cap / cat_vol_cap
-        param["Positive electrode thickness [m]"] = cat_thickness_cm * 1e-2
-    else:
-        param["Positive electrode thickness [m]"] = sim.cathode.thickness_um * 1e-6
-
     side_m = (sim.cell_area_cm2 * 1e-4) ** 0.5
     param["Electrode height [m]"] = side_m
     param["Electrode width [m]"] = side_m
@@ -143,12 +134,6 @@ def build_parameter_set(
 
     c_s_n_max = float(param["Maximum concentration in negative electrode [mol.m-3]"])
     c_s_p_max = float(param["Maximum concentration in positive electrode [mol.m-3]"])
-
-    param["Positive electrode exchange-current density [A.m-2]"] = (
-        lambda c_e, c_s_surf, c_s_max, T: cat.exchange_current_density_A_m2
-        * (c_s_surf / c_s_max) ** 0.5
-        * (1 - c_s_surf / c_s_max) ** 0.5
-    )
 
     # Calculate required cathode thickness to perfectly honor np_ratio in PyBaMM
     # Capacity proxy = c_s_max * am_vol_frac * thickness
@@ -222,12 +207,8 @@ def build_parameter_set(
     # Binder coverage ratio (Less binder = more cracking)
     binder_ratio = m.vf_binder / m.vf_si if m.vf_si > 0 else 1.0
     binder_penalty = 1.0 / max(binder_ratio, 0.1)  # Caps penalty
+    structural_penalty = (1.0 + 15000 * si_frac) * binder_penalty
 
-    # Base Paris law cracking rate for graphite (Chen2020) is ~3.9e-20
-    base_k = 3.9e-20
-    structural_penalty = (1.0 + 1500000 * si_frac) * binder_penalty
-
-    param["Negative electrode Paris' law constant k"] = base_k * structural_penalty
     param["Negative electrode partial molar volume [m3.mol-1]"] = 3.1e-6 * (
         1.0 + 10.0 * si_frac
     )
@@ -236,18 +217,18 @@ def build_parameter_set(
     param["Negative electrode Paris' law constant b"] = 1.12
     param["Negative electrode Paris' law constant m"] = 2.2
     # --- Crack geometry ---
-    param["Negative electrode initial crack length [m]"] = 20e-9  # 20 nm
+    param["Negative electrode initial crack length [m]"] = 2e-9  # 20 nm
     param["Negative electrode initial crack width [m]"] = 15e-9  # 15 nm
     param["Negative electrode number of cracks per unit area [m-2]"] = 3.18e15
 
     # --- Fracture threshold ---
-    param["Negative electrode critical stress [Pa]"] = 6e7  # 60 MPa, typical for Si
+    param["Negative electrode critical stress [Pa]"] = 2.5e8
 
     # --- Cracking rate: k_cr(T), Arrhenius form (Ai2020 style) --- [web:15]
     def si_cracking_rate(T_dim):
-        # Si is ~100x more crack-prone than graphite; Ai2020 graphite k_cr = 3.9e-20
+        # Si is ~100x more crack-prone than graphite
         # Si value scaled up accordingly (Bucci 2017, fracture-mechanics basis)
-        k_cr = 3.9e-20  # [m / (Pa·m^0.5)^m]
+        k_cr = 3.9e-23 * structural_penalty
         E_ac = 0.0  # activation energy [J/mol] — set 0 for isothermal runs
         arrhenius = pybamm.exp(E_ac / pybamm.constants.R * (1 / T_dim - 1 / 298.15))
         return k_cr * arrhenius
@@ -256,6 +237,10 @@ def build_parameter_set(
 
     # --- LAM (Loss of Active Material) driven by cracking ---
     param["Negative electrode LAM constant proportional term [s-1]"] = 2.7778e-7
+    param["Negative electrode LAM constant proportional to cracking rate"] = (
+        1.0e-3 * structural_penalty
+    )
+    param["Negative electrode LAM constant exponential term"] = 2.0
     param["Negative electrode activation energy for cracking rate [kJ.mol-1]"] = 0.0
 
     param["Positive electrode partial molar volume [m3.mol-1]"] = (
@@ -267,6 +252,27 @@ def build_parameter_set(
         "Positive electrode reference concentration for free of deformation [mol.m-3]"
     ] = 0.0
     param["Positive electrode volume change"] = lambda sto: 0.0 * sto
+
+    param["Initial SEI on cracks thickness [m]"] = 0.0
+    param["Initial inner SEI thickness [m]"] = 2.5e-9
+    param["Initial outer SEI thickness [m]"] = 2.5e-9
+    param["SEI kinetic rate constant [m.s-1]"] = 1.0e-12
+    param["SEI open-circuit potential [V]"] = 0.4
+    param["SEI resistivity [Ohm.m]"] = 2.0e5
+    param["SEI growth activation energy [J.mol-1]"] = 0.0
+    param["Outer SEI solvent diffusivity [m2.s-1]"] = 2.5e-22
+    param["Bulk solvent concentration [mol.m-3]"] = 2636.0
+    param["Inner SEI partial molar volume [m3.mol-1]"] = 9.585e-5
+    param["Outer SEI partial molar volume [m3.mol-1]"] = 9.585e-5
+    param["Ratio of inner and outer SEI partial molar volumes"] = 1.0
+
+    param["Inner SEI electron conductivity [S.m-1]"] = 8.95e-14
+    param["Inner SEI lithium interstitial diffusivity [m2.s-1]"] = 1.0e-20
+    param["Lithium interstitial reference concentration [mol.m-3]"] = 15.0
+
+    # --- Thermodynamics / Stress Coupling ---
+    param["Negative electrode OCV pressure derivative [V.m3.mol-1]"] = 0.0
+    param["Positive electrode OCV pressure derivative [V.m3.mol-1]"] = 0.0
 
     return param
 
