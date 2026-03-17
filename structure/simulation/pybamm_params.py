@@ -192,12 +192,11 @@ def build_parameter_set(
     param["Nominal cell capacity [A.h]"] = min(cat_practical_Ah, anode_practical_Ah)
     param["Positive electrode exchange-current density [A.m-2]"] = (
         lambda c_e, c_s_surf, c_s_max, T: cat.exchange_current_density_A_m2
-        * 2.0  # Scale so peak at c_s_max/2 equals the DB value
-        * (c_e / 1000.0) ** 0.5  # <-- CRUCIAL for high C-rate limits
+        * 2.0
+        * (c_e / 1000.0) ** 0.5
         * (c_s_surf / c_s_max) ** 0.5
         * (1 - c_s_surf / c_s_max) ** 0.5
     )
-    param["Negative electrode partial molar volume [m3.mol-1]"] = 8.39e-6
     v_si = vol.metadata.vf_si
     v_c = vol.metadata.vf_carbon
     v_tot = v_si + v_c
@@ -217,6 +216,21 @@ def build_parameter_set(
     eff_expansion = (v_si * si_exp + v_c * c_exp) / v_tot if v_tot > 0 else c_exp
 
     param["Negative electrode volume change"] = lambda sto: eff_expansion * sto
+
+    si_frac = m.vf_si / (m.vf_si + m.vf_carbon) if (m.vf_si + m.vf_carbon) > 0 else 0.0
+
+    # Binder coverage ratio (Less binder = more cracking)
+    binder_ratio = m.vf_binder / m.vf_si if m.vf_si > 0 else 1.0
+    binder_penalty = 1.0 / max(binder_ratio, 0.1)  # Caps penalty
+
+    # Base Paris law cracking rate for graphite (Chen2020) is ~3.9e-20
+    base_k = 3.9e-20
+    structural_penalty = (1.0 + 1500000 * si_frac) * binder_penalty
+
+    param["Negative electrode Paris' law constant k"] = base_k * structural_penalty
+    param["Negative electrode partial molar volume [m3.mol-1]"] = 3.1e-6 * (
+        1.0 + 10.0 * si_frac
+    )
 
     # --- Paris' Law scalars (b, m) --- [web:15][web:17]
     param["Negative electrode Paris' law constant b"] = 1.12
