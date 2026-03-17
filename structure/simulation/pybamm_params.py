@@ -228,7 +228,7 @@ def build_parameter_set(
     def si_cracking_rate(T_dim):
         # Si is ~100x more crack-prone than graphite
         # Si value scaled up accordingly (Bucci 2017, fracture-mechanics basis)
-        k_cr = 3.9e-23 * structural_penalty
+        k_cr = 3.9e-22 * structural_penalty
         E_ac = 0.0  # activation energy [J/mol] — set 0 for isothermal runs
         arrhenius = pybamm.exp(E_ac / pybamm.constants.R * (1 / T_dim - 1 / 298.15))
         return k_cr * arrhenius
