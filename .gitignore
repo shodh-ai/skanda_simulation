@@ -1,6 +1,7 @@
 __pycache__
 .vscode
 output
+logs
 
 *.pyc
 .DS_Store
