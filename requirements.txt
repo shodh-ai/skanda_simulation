@@ -7,3 +7,4 @@ scikit-image
 tifffile
 taufactor
 pybamm
+mpi4py
