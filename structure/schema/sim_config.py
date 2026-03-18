@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Annotated, Literal, Optional, Union
 from pydantic import BaseModel, Field, model_validator
 import yaml
+import numpy as np
 from pathlib import Path
 
 
@@ -189,6 +190,84 @@ class SimConfig(BaseModel):
     taufactor: TauFactorConfig = Field(default_factory=TauFactorConfig)
     pybamm: PyBaMMConfig = Field(default_factory=PyBaMMConfig)
     outputs: OutputsConfig = Field(default_factory=OutputsConfig)
+
+    # ------------------------------------------------------------------
+    # Sampling
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def sample(
+        cls,
+        *,
+        u: "np.ndarray | None" = None,
+        rng: "np.random.Generator | None" = None,
+        seed: int | None = None,
+    ) -> "SimConfig":
+        """
+        Create a sampled SimConfig from a unit-hypercube vector.
+
+        Parameters
+        ----------
+        u    : Optional pre-computed unit vector of length N_SIM_DIMS.
+               When None, one is drawn from ``rng`` or a fresh Generator.
+        rng  : Optional numpy Generator (used when ``u`` is None).
+        seed : Seed for a fresh Generator (used when both u and rng are None).
+
+        Examples
+        --------
+        # Single random sample:
+        sim = SimConfig.sample()
+
+        # From a pre-computed LHS row:
+        sim = SimConfig.sample(u=lhs_matrix[i, N_GEN_DIMS:])
+        """
+        import numpy as _np
+        from structure.sampling._sim_map import N_SIM_DIMS, map_sim_config
+
+        if u is None:
+            if rng is None:
+                rng = _np.random.default_rng(seed)
+            u = rng.random(N_SIM_DIMS)
+
+        kwargs = map_sim_config(_np.asarray(u, dtype=float))
+        return cls.model_validate(kwargs)
+
+    def to_flat_dict(self) -> dict:
+        """
+        Return a flat dict of all SimConfig fields prefixed with ``sim_``.
+        Protocols are broken out by name, e.g.:
+            sim_cycling_rate_capability_charge_c_rate,
+            sim_cycling_dcir_pulse_soc_point,
+            sim_cycling_cycle_life_n_cycles, ...
+
+        Suitable as a set of columns in a CSV row.
+        """
+        from structure.sampling.flatten import flatten_dict
+
+        raw = self.model_dump()
+
+        # Pull protocols out and flatten them separately by name
+        protocols_flat: dict = {}
+        for proto in raw.get("cycling", {}).get("protocols", []):
+            name = proto.get("name", "unknown")
+            for k, v in proto.items():
+                if k != "name":
+                    key = f"sim_cycling_{name}_{k}"
+                    protocols_flat[key] = (
+                        ";".join(str(x) for x in v) if isinstance(v, list) else v
+                    )
+
+        # Flatten everything except the protocols list
+        raw_no_proto = {
+            k: (
+                {kk: vv for kk, vv in v.items() if kk != "protocols"}
+                if k == "cycling"
+                else v
+            )
+            for k, v in raw.items()
+        }
+        base_flat = flatten_dict(raw_no_proto, prefix="sim")
+        return {**base_flat, **protocols_flat}
 
 
 def load_sim_config(path: str | Path) -> SimConfig:

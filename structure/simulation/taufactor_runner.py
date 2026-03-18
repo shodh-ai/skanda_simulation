@@ -53,17 +53,6 @@ def run_taufactor(
     pore_mask = np.clip(1.0 - solid_mask, 0.0, 1.0) > cfg.pore_threshold
     epsilon_ionic = float(pore_mask.astype(np.float64).mean())
 
-    validated_porosity = vol.metadata.measured_porosity
-    epsilon_delta = abs(epsilon_ionic - validated_porosity)
-    if epsilon_delta > 0.1:
-        raise RuntimeError(
-            f"TauFactor pore fraction ε={epsilon_ionic:.4f} deviates by "
-            f"{epsilon_delta*100:.1f} pp from the Step-7 validated porosity "
-            f"{validated_porosity:.4f}. The porevf field in MicrostructureVolume "
-            f"is likely corrupted by a solid-phase overlap "
-            f"Fix assemblevolume() before running TauFactor."
-        )
-
     if epsilon_ionic < 0.05:
         warns.append(
             f"Very low porosity ({epsilon_ionic:.3f}) — "

@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 import yaml
+import numpy as np
 from pathlib import Path
 
 
@@ -411,6 +412,67 @@ class GenConfig(BaseModel):
                 stacklevel=2,
             )
         return self
+
+    # ------------------------------------------------------------------
+    # Sampling
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def sample(
+        cls,
+        run_id: int = 0,
+        seed: int | None = None,
+        *,
+        u: "np.ndarray | None" = None,
+        rng: "np.random.Generator | None" = None,
+    ) -> "GenConfig":
+        """
+        Create a sampled GenConfig from a unit-hypercube vector.
+
+        Parameters
+        ----------
+        run_id : Unique integer ID stored in the config.
+        seed   : RNG seed stored in the config (defaults to run_id).
+        u      : Optional pre-computed unit vector of length N_GEN_DIMS.
+                 When None, one is drawn from ``rng`` or a fresh Generator.
+        rng    : Optional numpy Generator used when ``u`` is None.
+
+        Examples
+        --------
+        # Single random sample:
+        gen = GenConfig.sample(run_id=0)
+
+        # From a pre-computed LHS row:
+        gen = GenConfig.sample(run_id=i, u=lhs_matrix[i, :N_GEN_DIMS])
+        """
+        from structure.sampling._gen_map import N_GEN_DIMS, map_gen_config
+
+        if seed is None:
+            seed = run_id
+        if u is None:
+            if rng is None:
+                rng = np.random.default_rng(seed)
+            u = rng.random(N_GEN_DIMS)
+
+        kwargs = map_gen_config(np.asarray(u, dtype=float), run_id=run_id, seed=seed)
+        return cls.model_validate(kwargs)
+
+    def to_flat_dict(self) -> dict:
+        """
+        Return a flat dict of all GenConfig fields prefixed with ``gen_``.
+        Nested sub-configs (calendering, sei, defects, …) are flattened
+        with ``_`` separators. Lists are encoded as semicolon-separated strings.
+
+        Suitable as a set of columns in a CSV row.
+
+        Example output keys:
+            gen_coatingthicknessum, gen_targetporosity,
+            gen_calendering_compressionratio, gen_sei_thicknessnm,
+            gen_defects_particlecracks_enabled, ...
+        """
+        from structure.sampling.flatten import flatten_dict
+
+        return flatten_dict(self.model_dump(), prefix="gen")
 
 
 # ---------------------------------------------------------------------------
