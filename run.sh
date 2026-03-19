@@ -6,14 +6,15 @@
 #SBATCH --ntasks-per-node=200
 #SBATCH --mem=0
 #SBATCH --time=10-00:00:00
-#SBATCH --output=gen_log.out
-#SBATCH --error=gen_log.err
+#SBATCH --output=logs/gen_log.out
+#SBATCH --error=logs/gen_log.err
 
 echo "--- MPI Generation Started on $(hostname) ---"
 date
 
 source $HOME/miniconda/bin/activate gen_env
 cd $SLURM_SUBMIT_DIR
+mkdir -p logs
 set -e
 
 # --- CONFIGURATION FOR MPI STEPS ---
