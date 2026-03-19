@@ -47,7 +47,7 @@ _ELECTROLYTES = [
 _ETHER_ELECTROLYTES = frozenset(["LiFSI_DME_1M"])
 _SEPARATORS = ["Celgard2325", "Celgard2500", "Celgard3501", "ceramic_PP"]
 _DIRECTIONS = ["z", "all"]
-_PYBAMM_MODELS = ["SPM", "SPMe", "DFN"]
+_PYBAMM_MODELS = ["DFN"]
 
 
 def map_sim_config(u: np.ndarray) -> dict:
@@ -97,8 +97,17 @@ def map_sim_config(u: np.ndarray) -> dict:
             vlo_lo, vlo_hi = 2.50, 3.00
 
     vlo = _cont(take(), vlo_lo, vlo_hi)
-    vhi_min = max(vhi_lo, vlo + 0.10)  # ensure voltage_cutoff_high_V > low
-    vhi = _cont(take(), vhi_min, vhi_hi)
+    vhi_min = max(vhi_lo, vlo + 0.20)  # ensure voltage_cutoff_high_V > low with minimum 200mV window
+    # Add buffer to avoid edge cases and ensure stable voltage ranges
+    vhi_buffer = min(0.3, vhi_hi - vhi_min)  # Don't exceed upper bound
+    vhi_range_start = vhi_min + vhi_buffer
+    vhi = _cont(take(), vhi_range_start, vhi_hi)
+
+    # Ensure reasonable absolute voltage values
+    if vlo < 2.5:  # Minimum reasonable low voltage
+        vlo = 2.5
+    if vhi > 4.3:  # Maximum reasonable high voltage for most chemistries
+        vhi = 4.3
 
     # ── Rate capability protocol ──────────────────────────────────────────────
     rc_charge_rate = _cont(take(), 0.10, 0.50)

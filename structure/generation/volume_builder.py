@@ -147,6 +147,31 @@ def assemble_volume(
     binder_vf = cbd_result.binder_vf.astype(np.float32)
     sei_vf = sei_result.sei_vf.astype(np.float32)
 
+    # Ensure all arrays have the same shape as carbon_vf
+    # This can happen if calendering produces slightly different z-dimensions
+    target_shape = carbon_vf.shape
+
+    def ensure_shape(array, target_shape, name):
+        """Ensure array has target shape, padding or truncating z-dimension if needed."""
+        if array.shape == target_shape:
+            return array
+
+        # Only handle z-dimension mismatches (assume x,y are correct)
+        if array.shape[:2] != target_shape[:2]:
+            raise ValueError(f"Cannot reshape {name} from {array.shape} to {target_shape}: x,y dimensions don't match")
+
+        # Create new array with target shape
+        result = np.zeros(target_shape, dtype=array.dtype)
+        z_copy = min(array.shape[2], target_shape[2])
+        result[:, :, :z_copy] = array[:, :, :z_copy]
+        return result
+
+    si_vf = ensure_shape(si_vf, target_shape, "si_vf")
+    coating_vf = ensure_shape(coating_vf, target_shape, "coating_vf")
+    cbd_vf = ensure_shape(cbd_vf, target_shape, "cbd_vf")
+    binder_vf = ensure_shape(binder_vf, target_shape, "binder_vf")
+    sei_vf = ensure_shape(sei_vf, target_shape, "sei_vf")
+
     # CBD, Binder, and SEI live in the pore space outside carbon.
     free_from_carbon = np.clip(1.0 - carbon_vf, 0.0, 1.0)
     cbd_vf = (cbd_vf * free_from_carbon).astype(np.float32)

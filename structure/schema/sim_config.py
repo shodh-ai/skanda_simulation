@@ -118,6 +118,22 @@ class CyclingConfig(BaseModel):
                 f"voltage_cutoff_high_V ({self.voltage_cutoff_high_V}) "
                 f"must be > voltage_cutoff_low_V ({self.voltage_cutoff_low_V})"
             )
+        # Ensure voltage window is large enough for stable simulation
+        voltage_window = self.voltage_cutoff_high_V - self.voltage_cutoff_low_V
+        if voltage_window < 0.2:  # At least 200mV window needed
+            raise ValueError(
+                f"Voltage window ({voltage_window:.3f}V) is too small for stable simulation. "
+                f"Minimum 0.2V required."
+            )
+        # Ensure voltages are physically reasonable
+        if self.voltage_cutoff_low_V <= 0.0:
+            raise ValueError(
+                f"voltage_cutoff_low_V ({self.voltage_cutoff_low_V}) must be positive"
+            )
+        if self.voltage_cutoff_high_V > 5.0:
+            raise ValueError(
+                f"voltage_cutoff_high_V ({self.voltage_cutoff_high_V}) is unreasonably high (>5.0V)"
+            )
         return self
 
     def get_protocol(self, name: str) -> Optional[Protocol]:

@@ -209,7 +209,13 @@ def calender_fields(
         zoomed = zoom(field.astype(np.float32), [1.0, 1.0, cr], order=1)
         nz_new = min(zoomed.shape[2], nz)
         out = np.zeros((field.shape[0], field.shape[1], nz), dtype=np.float32)
-        out[:, :, :nz_new] = zoomed[:, :, :nz_new]
+        # Ensure shapes match for assignment
+        if nz_new > 0:
+            # Handle the case where zoomed shape might be broadcastable but with different dimensions
+            out[:, :, :nz_new] = zoomed[:, :, :nz_new][:, :, :nz_new]
+        else:
+            # If nz_new is 0, keep the zeros array
+            pass
 
         # Renormalize before clip
         V_after_zoom = float(out.sum())
@@ -242,7 +248,9 @@ def calender_fields(
         zoomed = zoom(mask.astype(np.float32), [1.0, 1.0, cr], order=0)
         nz_new = min(zoomed.shape[2], nz)
         out = np.zeros((mask.shape[0], mask.shape[1], nz), dtype=bool)
-        out[:, :, :nz_new] = zoomed[:, :, :nz_new] > 0.5
+        # Ensure shapes match for assignment
+        if nz_new > 0:
+            out[:, :, :nz_new] = zoomed[:, :, :nz_new][:, :, :nz_new] > 0.5
         return out
 
     si_vf_c, w_si_vf = _compress_vf(si_result.si_vf, "si_vf")

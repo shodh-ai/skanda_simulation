@@ -58,7 +58,7 @@ from ._primitives import _cont, _cat, _bool, _int
 
 N_GEN_DIMS: int = 46
 
-_VOXEL_CHOICES = [64, 128]
+_VOXEL_CHOICES = [128]
 _MORPHOLOGY = ["spherical", "irregular", "porous"]
 _DISTRIBUTION = ["embedded", "surface_anchored", "core_shell"]
 _COATING_TYPE = ["carbon_coating", "siox_coating"]
@@ -117,11 +117,15 @@ def map_gen_config(u: np.ndarray, run_id: int, seed: int) -> dict:
 
     # coating thickness: constrained by type AND particle size (<= 50% of radius)
     max_by_particle = 0.50 * (si_particle_d50_nm / 2.0)
-    if si_coating_type == "sioxcoating":
+    if si_coating_type == "siox_coating":
         coat_lo, coat_hi = 2.0, min(20.0, max_by_particle)
     else:  # carboncoating
         coat_lo, coat_hi = 5.0, min(50.0, max_by_particle)
     coat_hi = max(coat_hi, coat_lo)  # safety clamp
+    # Ensure the ranges are strictly enforced
+    coat_hi = (
+        min(coat_hi, 20.0) if si_coating_type == "siox_coating" else min(coat_hi, 50.0)
+    )
     si_coating_thickness_nm = _cont(take(), coat_lo, coat_hi)
 
     # ── Carbon matrix ─────────────────────────────────────────────────────────

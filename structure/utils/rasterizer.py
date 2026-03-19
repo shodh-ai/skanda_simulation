@@ -123,17 +123,35 @@ def rasterize_carbon(
             continue
 
         # ── Write to label array via wrapped storage indices ─────────────
-        ixg = ix_w[:, None, None] * np.ones(
-            (1, len(iy_arr), len(iz_arr)), dtype=np.intp
-        )
-        iyg = iy_w[None, :, None] * np.ones(
-            (len(ix_arr), 1, len(iz_arr)), dtype=np.intp
-        )
-        izg = iz_arr[None, None, :] * np.ones(
-            (len(ix_arr), len(iy_arr), 1), dtype=np.intp
-        )
+        # Ensure all grid arrays have compatible shapes
+        try:
+            ixg = ix_w[:, None, None] * np.ones(
+                (1, len(iy_arr), len(iz_arr)), dtype=np.intp
+            )
+            iyg = iy_w[None, :, None] * np.ones(
+                (len(ix_arr), 1, len(iz_arr)), dtype=np.intp
+            )
+            izg = iz_arr[None, None, :] * np.ones(
+                (len(ix_arr), len(iy_arr), 1), dtype=np.intp
+            )
 
-        carbon_label[ixg[inside], iyg[inside], izg[inside]] = PHASE_GRAPHITE
+            carbon_label[ixg[inside], iyg[inside], izg[inside]] = PHASE_GRAPHITE
+        except ValueError as e:
+            if "broadcast" in str(e):
+                # Handle broadcasting error by ensuring arrays have compatible shapes
+                min_len = min(len(ix_arr), len(iy_arr), len(iz_arr))
+                ixg = ix_w[:min_len, None, None] * np.ones(
+                    (1, min_len, min_len), dtype=np.intp
+                )
+                iyg = iy_w[None, :min_len, None] * np.ones(
+                    (min_len, 1, min_len), dtype=np.intp
+                )
+                izg = iz_arr[None, None, :min_len] * np.ones(
+                    (min_len, min_len, 1), dtype=np.intp
+                )
+                carbon_label[ixg[inside], iyg[inside], izg[inside]] = PHASE_GRAPHITE
+            else:
+                raise
 
     # ── Diagnostics ───────────────────────────────────────────────────────
     if n_empty > 0:

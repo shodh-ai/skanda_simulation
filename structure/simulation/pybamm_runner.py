@@ -58,24 +58,65 @@ def _make_solver(sim: ResolvedSimulation) -> "pybamm.BaseSolver":
     cls = {"IDAKLUSolver": pybamm.IDAKLUSolver, "CasadiSolver": pybamm.CasadiSolver}[
         sim.pybamm.solver
     ]
-    return cls(atol=sim.pybamm.atol, rtol=sim.pybamm.rtol)
+
+    # Use more robust solver settings for difficult cases
+    solver_kwargs = {
+        "atol": sim.pybamm.atol,
+        "rtol": sim.pybamm.rtol,
+        "max_steps": 10000,  # Increase from default
+        "max_h": 100,  # Maximum step size
+        "min_h": 1e-10,  # Minimum step size
+        "suppress_solve": True,  # Suppress some solver output
+    }
+
+    # For IDAKLU, add additional robustness parameters
+    if sim.pybamm.solver == "IDAKLUSolver":
+        solver_kwargs.update({
+            "linear_solver": "KLU",
+            "max_err_test_fails": 10,  # More attempts before failure
+            "max_nonlin_iters": 6,  # More nonlinear iterations
+            "max_setups": 10,
+        })
+
+    return cls(**solver_kwargs)
 
 
 def _solution_is_valid(sol: "pybamm.Solution") -> bool:
     """
     Return False when PyBaMM logged an error but didn't raise.
-    Catches two failure modes:
+    Catches multiple failure modes:
       1. Empty solution — no timepoints at all
       2. Rest-only solution — experiment ran rest step but failed on
          the discharge/charge step, returning I≈0 throughout
+      3. Unphysical voltage values
+      4. Very short simulations
     """
     try:
         t = sol["Time [s]"].entries
         if len(t) <= 1 or float(t[-1]) <= 0.0:
             return False
+
         I = sol["Current [A]"].entries
         # If max |I| is effectively zero, only the rest step ran
-        return float(np.max(np.abs(I))) >= 1e-6
+        if float(np.max(np.abs(I))) < 1e-6:
+            return False
+
+        # Check for reasonable duration
+        if float(t[-1]) < 1.0:  # Less than 1 second of simulation
+            return False
+
+        # Check voltage is physical (not negative or zero)
+        try:
+            V = sol["Terminal voltage [V]"].entries
+            if len(V) > 0:
+                max_V = float(np.max(V))
+                min_V = float(np.min(V))
+                if max_V <= 0.0 or min_V <= 0.0:
+                    return False
+        except Exception:
+            pass  # Voltage variable might not exist in all solutions
+
+        return True
     except Exception:
         return False
 
@@ -139,7 +180,16 @@ def run_rate_capability(
             energy_densities.append(E_mWh_cm2)
 
         except Exception as exc:
-            warns.append(f"C-rate {c_rate}C failed: {exc}")
+            exc_str = str(exc)
+            # Provide more specific warnings for common failure modes
+            if "Maximum voltage" in exc_str and "non-positive" in exc_str:
+                warns.append(f"C-rate {c_rate}C failed: voltage parameters invalid - {exc}")
+            elif "IDA_CONV_FAIL" in exc_str or "convergence" in exc_str.lower():
+                warns.append(f"C-rate {c_rate}C failed: solver convergence issue - {exc}")
+            elif "consistent states" in exc_str.lower():
+                warns.append(f"C-rate {c_rate}C failed: inconsistent initial states - {exc}")
+            else:
+                warns.append(f"C-rate {c_rate}C failed: {exc}")
             capacities.append(_NAN)
             energy_densities.append(_NAN)
 
